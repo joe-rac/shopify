@@ -32,7 +32,7 @@ def goodDateStr(dstr):
     if not dstr.strip():
         dstr = 'BLANK'
     try:
-        date_str = parser.parse(dstr).strftime('%Y-%m-%d')
+        date_str =  parser.parse(dstr).strftime('%Y-%m-%d')
         return date_str,error_msg
     except ValueError:
         error_msg = "Date of '{0}' is not valid.".format(dstr)
