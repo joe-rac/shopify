@@ -1,4 +1,4 @@
-set_credentials.ps1
+credentials.txt
 .env
 __pycache__/
 *.pyc

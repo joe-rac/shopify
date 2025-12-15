@@ -18,7 +18,8 @@ import pprint
 from dateutil import parser
 import tracemalloc
 from consts import NEAF_YEAR_VALID,NEAF_YEAR_DEFAULT,USE_GRAPHQL,SKUS_TO_LOAD_DICT
-from consts import NEAF_YEAR_ALL,ALL,SHOP_NAME,API_KEY_2,PASSWORD_2,API_KEY_RW,PASSWORD_RW,RawOrdersTup
+from consts import NEAF_YEAR_ALL,ALL,SHOP_NAME,RawOrdersTup
+from credentials import Credentials
 from utils import get_default_neaf_year,remove_unicode,NeafVendorTup,OrderTup,get_date,utc_for_midnight_local
 from graphql_queries import ORDER_DETAILS,ORDERS_BY_SKU_BETWEEN_DATES,ORDER_BY_NAME
 from graphql_utils import get_orders_cursor_items,get_url_and_headers
@@ -252,8 +253,11 @@ class AccessShopify(object):
             created_at_max = created_at_max.strftime('%Y-%m-%d')
         else:
             created_at_max = self.created_at_max
-        msg = '\nIn shopifyOrdersFromHttps accessing orders at https://{0}.myshopify.com/admin/orders.json with limit={1}, created_at_min={2} 00:01, created_at_max={3} 23:59\n'
-        print(msg.format(SHOP_NAME,limit,self.created_at_min,created_at_max))
+
+        orders_to_debug = self.order_to_debug.split('|') if self.order_to_debug else []
+        order_to_debug_str = ' order_to_debug:{0},'.format(self.order_to_debug) if self.order_to_debug else ''
+        msg = '\nIn shopifyOrdersFromHttps accessing orders at https://{0}.myshopify.com/admin/orders.json with limit={1},{2} created_at_min={3} 00:01, created_at_max={4} 23:59\n'
+        print(msg.format(SHOP_NAME,limit,order_to_debug_str,self.created_at_min,created_at_max))
 
         while True:
             page += 1
@@ -270,7 +274,7 @@ class AccessShopify(object):
                 reqstr = link
 
             try:
-                response = requests.get(reqstr,auth=(API_KEY_2,PASSWORD_2))
+                response = requests.get(reqstr,auth=(Credentials().SHOPIFY_API_KEY_2,Credentials().SHOPIFY_PASSWORD_2))
             except Exception as ex:
                 self.error = 'Exception running\n{0}\nof\n{1}\nWe are screwed.'.format(reqstr,ex)
                 return
@@ -287,11 +291,20 @@ class AccessShopify(object):
             #res_text = res_text.encode('ascii','ignore')
             rd =  json.loads(res_text)
             orders = list(rd.values())[0]
+            if not len(orders):
+                # we have processed last page, we are done
+                break
+
+            if orders_to_debug:
+                # 11/25/2025. discard orders not in order_to_debug
+                for o in orders[:]:
+                    if o['name'][1:] not in orders_to_debug:
+                        orders.remove(o)
+
             #orders = remove_unicode(orders)
             raw_orders_count = len(orders)
             if not raw_orders_count:
-                # we have processed last page, we are done
-                break
+                continue
 
             total_raw_orders_count += raw_orders_count
             first_key,first_date,last_key,last_date = self.getRangeItems(orders)
@@ -390,12 +403,12 @@ class AccessShopify(object):
         total_raw_orders_count = 0
         self.rawOrdersTupList.clear()
 
+        url, headers = get_url_and_headers()
         sku_str = ' sku starts with:{0},'.format(self.sku_key) if self.sku_key else ''
         order_to_debug_str = ' order_to_debug:{0},'.format(self.order_to_debug) if self.order_to_debug else ''
-        msg = '\nIn shopifyOrdersFromGraphQL accessing orders at https://{0}.myshopify.com/admin/api/2022-01/graphql.json with limit={1},{2}{3} created_at_min={4}, created_at_max={5}\n'
-        print(msg.format(SHOP_NAME,limit,sku_str,order_to_debug_str,str(self.created_at_min),str(self.created_at_max)))
+        msg = '\nIn shopifyOrdersFromGraphQL accessing orders at {0} with\nlimit={1},{2}{3} created_at_min={4}, created_at_max={5}\n'
+        print(msg.format(url,limit,sku_str,order_to_debug_str,str(self.created_at_min),str(self.created_at_max)))
 
-        url, headers = get_url_and_headers()
         if self.order_to_debug:
 
             # 1/3/2025. if debugging a single order use ORDER_BY_NAME here.
@@ -602,110 +615,3 @@ class AccessShopify(object):
         print('\nmemory usage at exit from AccessShopify.convertShopifyOrdersToRacOrders: {0}\n'.format(tracemalloc.get_traced_memory()[0]))
         return smallest_order_num,largest_order_num
 
-def main():
-    
-    # some sample shopify queries other than orders, not that interesting.
-    '''
-    response = requests.get( 'https://%s.myshopify.com/admin/products/count.json' % SHOP_NAME,
-                               auth=(API_KEY,PASSWORD))   
-    print response.text  
-    response = requests.get( 'https://%s.myshopify.com/admin/orders/count.json' % SHOP_NAME,
-                               auth=(API_KEY,PASSWORD))   
-    if response.status_code != 200:
-        print 'Failure, response.status_code is {0}'.format(response.status_code)                         
-    print response.text      
-    # max response size is 250. have to read pages after that.   
-    response = requests.get( 'https://%s.myshopify.com/admin/orders.json?since_id=3010' % SHOP_NAME,
-                               auth=(API_KEY,PASSWORD)) 
-    text1 = response.text                           
-    print response.status_code 
-    req = 'https://%s.myshopify.com/admin/orders.json?updated_at_min=2015-02-01 00:00:01 EDT -04:00' % SHOP_NAME
-    response = requests.get(req,auth=(API_KEY,PASSWORD))     
-    print response.status_code    
-    text2 = response.text  '''
-    
-    # look at doc C:\Users\joe1\rac\ecommerce\docs\shopify_api_json_schema.txt on 76 Lime Kiln computer for details on 
-    # schema for orders .  small modification to build_door_prize_dict_from_shopify and get_doorPrizeTup_dict should 
-    # support processing of NEAF vendor orders.
-    
-    #reqstr = 'https://%s.myshopify.com/admin/orders.json?' +\
-    #    'fields=created_at,id,name,customer,line_items&limit=250&page=1&created_at_min=2014-10-01 00:01'
-
-
-    order_id = 1980097560658 # test order #9130 for Joe's dumb ass scopes
-    #order_id = 1974718529618 # order #9129 for photonic cleaning
-    order_id = 2144708198482 # order #9481 for nimax with partial refund an cancel
-    order_id = 2144844677202 # order #9483 also for nimax, partial refunds
-    order_id = 5060039639122 # order 13167 for Donald A Kaplan buying membership at club table for NEAF 2023 using POS
-    order_id = 6208463405138 # order 15568 for Celestron with NEAF Vendor Payment of $1450 with bad  'note_attributes': [{'name': '1 - NEAF Vendor Payment', 'value': ''}]
-    #order_id = '6234913341522' # order 15713 for NEAIC with no note_attribute items of []
-
-    #reqstr = 'https://{0}.myshopify.com/admin/orders/{1}.json'
-    reqstr = 'https://{0}.myshopify.com/admin/api/2019-10/orders/{1}.json'
-    req = reqstr.format(SHOP_NAME,order_id)
-    response = requests.get(req,auth=(API_KEY_RW,PASSWORD_RW))
-    print((response.status_code))
-    #print response.text
-    rd =  json.loads(response.text)['order']
-    rd = remove_unicode(rd)
-    # 12/18/2019. msg is full dump of orders. very useful for seeing what's available for note_attributes in function shopify_https_request
-    msg = pprint.pformat(rd,width=200)
-    print(msg)
-    note = rd['note']
-    print(note)
-    return
-
-    #note_dict = {"order":{"id":1980097560658,"note":"change to new note through python"}}
-
-    note_dict = {"order":{"id":order_id,"note_attributes": [{"name":DELETE_BADGE+'_1',"value":"Blah Blah"},
-                                                            {"name":NEW_BADGE+'_2',"value":"Mordechai Levine"},
-                                                            {"name":DELETE_BADGE+'_3',"value":"joey jeff"},
-                                                                 ]}}
-    #note_dict = {unicode('order'):{unicode('id'):1980097560658,unicode('note'):unicode('change to new note through python')}}
-    #note_dict = {"id":1980097560658,"note":"change to new note through python"}
-
-    note_update = json.dumps(note_dict)
-    #note_update = unicode(note_update)
-    r_headers = {'Content-Type': 'application/json'}
-    r = requests.put(url=req, data=note_update, auth=(API_KEY_RW,PASSWORD_RW),headers = r_headers)
-
-    return
-
-#main()
-
-def change_note_update():
-
-    # 12/19/2022. this function used to change note_attributes from
-
-    # [{NOTE_ATTRIBUTE_KEY(): 'Badge_Name_1', 'value': 'bob smith'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_2', 'value': 'john dow'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_3', 'value': 'Billy Bob'},
-    # {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_4', 'value': 'Richard Nixon'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_5', 'value': 'Spiro Agnew'}]
-
-    # to
-
-    # [{NOTE_ATTRIBUTE_KEY(): 'Badge_Name_9426', 'value': 'bob smith'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_9426', 'value': 'john dow'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_9426', 'value': 'Billy Bob'},
-    # {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_9426', 'value': 'Richard Nixon'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_9426', 'value': 'Spiro Agnew'}]
-
-    order_id = 2129787781202
-    order_id = 6208463405138  # order 15568 for Celestron with NEAF Vendor Payment of $1450 with bad  'note_attributes': [{'name': '1 - NEAF Vendor Payment', 'value': ''}] changes to []
-
-    reqstr = 'https://{0}.myshopify.com/admin/api/2019-10/orders/{1}.json'
-    req = reqstr.format(SHOP_NAME, order_id)
-
-    note_dict = {"order": {"id": order_id, "note_attributes": [{"name": "Badge_Name_9426_1", "value": "bob smith"}, {"name": "Badge_Name_9426_2", "value": "john dow"},
-                                                               {"name": "Badge_Name_9426_3", "value": "Billy Bob"}, {"name": "Badge_Name_9426_4", "value": "Richard Nixon"},
-                                                               {"name": "Badge_Name_9426_5", "value": "Spiro Agnew"}]
-                }}
-
-    note_dict = {"order": {"id": order_id, "note_attributes": []
-                }}
-
-
-    note_update = json.dumps(note_dict)
-    r_headers = {'Content-Type': 'application/json'}
-    r = requests.put(url=req, data=note_update, auth=(API_KEY_RW, PASSWORD_RW), headers=r_headers)
-
-    return
-
-#change_note_update()
-#main()
-#build_door_prize_dict_from_shopify(verbose=True)

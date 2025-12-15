@@ -1,0 +1,3 @@
+"C:\Program Files (x86)\Adobe\Acrobat Reader DC\Reader\AcroRd32.exe" /A "pagemode=FullScreen=OpenActions&zoom=100=OpenActions&toolbar=0=OpenActions&statusbar=0=OpenActions&navpanes=0=OpenActions&scrollbar=0=OpenActions" "C:\Users\joe1\Desktop\RAC_DIR\door_prize_winner.pdf"
+REM "C:\Program Files (x86)\Adobe\Acrobat Reader DC\Reader\AcroRd32.exe" "C:\Users\joe1\AppData\Local\Temp\neaf_output\door_prize_winner.pdf"
+pause

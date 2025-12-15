@@ -1,0 +1,13 @@
+# to run from powershell:
+# cd "C:\Users\jjmos\Dropbox\RAC\py_scripts"
+# pip install -r requirements.txt
+# use pip3 on mac
+pytz
+requests
+python-dateutil
+pyspellchecker
+autocorrect
+fpdf
+PyPDF2
+reportlab
+flask
