@@ -127,8 +127,8 @@ def neafvendors_from_orders(ind=12,use_graphql=True):
     #                 support multiple orders for single vendor like for Explore Scientific with
     #                 order_to_debug = '13717|13712'
     # order_to_debug = '8948'
-
-    order_to_debug = '17161|17181'
+    # 12/16/2025. 17190|17193|17198|17206|17218 are 5 canceled orders for Joes half assed scope. working on bug fix to exclude them from further NEAF vendor processing.
+    order_to_debug = '17190|17193|17198|17206|17218'
 
     nv = NEAFVendor(neaf_year,created_at_min,created_at_max,order_to_debug,verbose)
     nv.shopifyLoad()
