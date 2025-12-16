@@ -5,6 +5,7 @@ ORDER_DETAILS = """
         name
         id
         note
+        cancelledAt
 
         customAttributes {
           key
