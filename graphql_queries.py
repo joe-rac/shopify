@@ -5,8 +5,10 @@ ORDER_DETAILS = """
         name
         id
         note
+        createdAt
+        discountCodes
         cancelledAt
-
+ 
         customAttributes {
           key
           value
@@ -72,9 +74,6 @@ ORDER_DETAILS = """
             }
           }
         }
-        
-        createdAt
-        discountCodes
         
         currentTotalDiscountsSet {
           shopMoney {
