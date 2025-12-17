@@ -3,36 +3,6 @@ from consts import NEAF_VENDOR,NEAF_YEAR_COVID,COVID_NEAF_VENDOR_SKUS_TO_EXCLUDE
 from consts import VIRTUAL_NEAF_ORDER_RANGE,NEAF_ATTEND,NEAF_VIRTUAL_DOORPRIZE,N_A,MISSING,REFUND
 from utils import get_max_len,getItem,NOTE_ATTRIBUTE_KEY,PROPERTIES_KEY
 
-class HTTP_KEYS_RESTER(object):
-    created_at = 'created_at'
-    refund_line_items = 'refund_line_items'
-    order_adjustments = 'order_adjustments'
-    discount_codes = 'discount_codes'
-    first_name = 'first_name'
-    last_name = 'last_name'
-    note_attributes = 'note_attributes'
-    total_discounts = 'total_discounts'
-    billing_address = 'billing_address'
-    default_address = 'default_address'
-    province_code = 'province_code'
-    country_code = 'country_code'
-    line_items = 'line_items'
-
-class HTTP_KEYS_GRAPHQL(object):
-    created_at = 'createdAt'
-    refund_line_items = 'refundLineItems'
-    order_adjustments = 'adjustments'
-    discount_codes = 'discountCodes'
-    first_name = 'firstName'
-    last_name = 'lastName'
-    note_attributes = 'customAttributes'
-    total_discounts = 'currentTotalDiscountsSet' # this one is more complex. we need order['currentTotalDiscountsSet']['shopMoney']['amount']
-    billing_address = 'billingAddress'
-    default_address = 'addresses'
-    province_code = 'province'
-    country_code = 'country'
-    line_items = 'lineItems'
-
 def skipExcludedCovidSkuOrders(neaf_year_raw,sku_key,sku,customer,created_at,order_num,excludedCovidSkuOrdersDict):
 
     # TODO 1/29/2022. possibly add created_at logic for neaf_vendor_sponsor_logo_and_link, neaf_vendor_sponsor_ad_and_link which are 2 items in COVID_NEAF_VENDORS_SKUS_TO_EXCLUDE .
