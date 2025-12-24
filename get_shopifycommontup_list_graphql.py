@@ -263,8 +263,11 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
                 found_order_to_debug = True
         created_at = order['createdAt'] # 1/2/2025. previously was created_at in rester api.
         created_at = convert_utc_to_local_datetime(created_at)
-        canceled_at = order['canceledAt'] # 1/2/2025. previously was created_at in rester api.
-        canceled_at = convert_utc_to_local_datetime(canceled_at)
+        cancelled_at = order['cancelledAt'] # 1/2/2025. previously was created_at in rester api.
+        cancelled_at = convert_utc_to_local_datetime(cancelled_at)
+        if cancelled_at:
+            print(f"Skipping order #{order_num}, created at:{created_at}. This order was canceled as indicated by order['cancelledAt']:{cancelled_at}")
+            continue
         note = '' if not order['note'] else order['note']
         note_attributes = order['customAttributes'] # 1/2/2025. previously was note_attributes in rester api.
         if not order.get('customer'):
@@ -398,7 +401,7 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
                     discount_allocations = float(da_list[0]['allocatedAmountSet']['shopMoney']['amount'])
 
             found_valid_line_item = True
-            sct = ShopifyCommonTup(order_id,order_num,created_at,canceled_at,note,note_attributes,customer,total_discount,discount_codes,discount_allocations,name,first_name,last_name,email,
+            sct = ShopifyCommonTup(order_id,order_num,created_at,cancelled_at,note,note_attributes,customer,total_discount,discount_codes,discount_allocations,name,first_name,last_name,email,
                                    default_address,province_code,country_code,phone_num,sku,quantity,refund_note,refund_created_at,line_item)
             # 2/12/2025. lineItemCount is count of number of line items that are turned into ShopifyCommonTup objects.
             lineItemCount += 1

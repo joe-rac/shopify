@@ -137,7 +137,10 @@ def neafvendors_from_orders(ind=12,use_graphql=True):
     else:
         print(nv.output_nvt_csv('neaf_management'))
         #company_key = 'Australis'
-        invoice = next(iter(nv.nv_collections.vendor_invoices.values()))
+        if not nv.nv_collections.vendor_invoices:
+            invoice = f'nv.nv_collections.vendor_invoices is {nv.nv_collections.vendor_invoices}. No invoices created for order_to_debug:{order_to_debug}.'
+        else:
+            invoice = next(iter(nv.nv_collections.vendor_invoices.values()))
         print(invoice)
 
     USE_GRAPHQL[0] = orig_use_graphql
@@ -213,7 +216,7 @@ def rester_note_attributes_update_1():
 
     order_id = 1980097560658 # test order #9130 for Joe's dumb ass scopes
     #order_id = 1974718529618 # order #9129 for photonic cleaning
-    order_id = 2144708198482 # order #9481 for nimax with partial refund an cancel
+    order_id = 2144708198482 # order #9481 for nimax with partial refund
     order_id = 2144844677202 # order #9483 also for nimax, partial refunds
     order_id = 5060039639122 # order 13167 for Donald A Kaplan buying membership at club table for NEAF 2023 using POS
     order_id = 6208463405138 # order 15568 for Celestron with NEAF Vendor Payment of $1450 with bad  'note_attributes': [{'name': '1 - NEAF Vendor Payment', 'value': ''}]

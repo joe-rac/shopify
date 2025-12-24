@@ -176,6 +176,9 @@ def get_date(date_and_time_str):
     return None
 
 def convert_utc_to_local_datetime(utc_dtime_str):
+    if utc_dtime_str is None:
+        # 12/17/2025. added this block to handle cancelledAt for all orders that were never canceled. they have cancelledAt of None.
+        return utc_dtime_str
     utc_datetime = datetime.datetime.strptime(utc_dtime_str, utc_format)
     utc_datetime = pytz.utc.localize(utc_datetime)
     eastern_datetime = utc_datetime.astimezone(eastern_zone)

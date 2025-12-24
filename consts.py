@@ -87,7 +87,7 @@ COVID_NEAF_VENDOR_SKUS_TO_EXCLUDE = ('neaf_vendor_booth_virtual_already_register
 # exclude them only in date range VIRTUAL_NEAF_ORDER_RANGE.
 COVID_NEAF_VENDOR_SKUS_TO_EXCLUDE_CONDITIONALLY = ('neaf_vendor_sponsor_logo_and_link','neaf_vendor_sponsor_ad_and_link')
 
-SHOPIFY_COMMON_FIELDS = 'order_id order_num created_at canceled_at note note_attributes customer total_discounts discount_codes discount_allocations name first_name last_name email '+\
+SHOPIFY_COMMON_FIELDS = 'order_id order_num created_at cancelled_at note note_attributes customer total_discounts discount_codes discount_allocations name first_name last_name email '+\
                         'default_address province_code country_code phone_num sku quantity refund_note refund_created_at line_item'
 # ShopifyCommonTup is a fairly raw representation of a single line_item in a single order_num. there will be duplicate order items across different line_items in same order.
 ShopifyCommonTup = namedtuple('ShopifyCommonTup', SHOPIFY_COMMON_FIELDS)

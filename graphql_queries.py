@@ -8,7 +8,7 @@ ORDER_DETAILS = """
         createdAt
         discountCodes
         cancelledAt
- 
+        
         customAttributes {
           key
           value
@@ -157,6 +157,22 @@ ORDER_DETAILS = """
 ORDERS_BY_SKU_BETWEEN_DATES = """
 {
   orders(first: LIMIT, after: "END_CURSOR_HERE", query: "(sku:SKU_PREFIX_HERE*) AND created_at:>=CREATED_AT_MIN AND created_at:<CREATED_AT_MAX") {
+    edges {
+      node {
+        INSERT_ORDER_DETAILS_HERE
+      }
+    }  
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+"""
+
+ORDERS_BETWEEN_DATES = """
+{
+  orders(first: LIMIT, after: "END_CURSOR_HERE", query: "created_at:>=CREATED_AT_MIN AND created_at:<CREATED_AT_MAX") {
     edges {
       node {
         INSERT_ORDER_DETAILS_HERE
