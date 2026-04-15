@@ -1,5 +1,5 @@
 from utils import build_startup_parameters
-from consts import NEAF_MANAGMENT,NEAF_FULL,NEAF_RAW,NEAF_COMPANY_BADGE,NEAF_YEAR_DEFAULT
+from consts import NEAF_VENDOR,NEAF_FULL,NEAF_RAW,NEAF_COMPANY_BADGE,NEAF_YEAR_DEFAULT
 from neaf_vendor_utils import get_neaf_year
 from neaf_vendor import NEAFVendor,save_invoice,set_as_pdf
 
@@ -86,7 +86,7 @@ def main(argv):
             target_company,target_company_invoice = neafVendor.get_target_company_invoice(target_companies,option_args)
             print(target_company_invoice)
         if option == 1:
-            print(neafVendor.output_nvt_csv(NEAF_MANAGMENT))
+            print(neafVendor.output_nvt_csv(NEAF_VENDOR))
         if option == 3:
             print(neafVendor.output_nvt_csv(NEAF_FULL))
         if option == 4:

@@ -3,11 +3,9 @@ import json
 import pprint
 from datetime import datetime,timedelta
 from dateutil import parser
-from consts import SHOP_NAME,NEAF_VENDOR,ADMIN_API_VERSION
-from credentials import Credentials
+from consts import NEAF_VENDOR,FAKE_TEST_KEY,FAKE_TEST_VALUE
 from graphql_queries import ORDER_DETAILS,ORDER_BY_ORDER_ID,ORDERS_BY_SKU_BETWEEN_DATES,ORDER_BY_NAME,ORDERS_BETWEEN_DATES
-from graphql_utils import get_orders_cursor_items,get_url_and_headers
-from utils import remove_unicode
+from graphql_utils import get_orders_cursor_items,get_url_and_headers,load_and_adjust_custom_attributes,mutate_custom_attributes
 
 '''
     # some useful sample orders for debugging interesting use cases    
@@ -110,12 +108,13 @@ def graphql_order_by_order_id_test(order_id='6104100438098'):
         print(res_str)
     return
 
-def graphql_order_by_name_test(name='17204'):
+def graphql_order_by_order_num_test(name='17712'):
 
     # 12/26/2024. 13695 has "Additional details" of company name edit and 2 bdage name deletes. Also has refund of booth.
     # 2/28/2025.  15569 skywatcher has 848-248-0424 in old phone_num but MISSING in new.
     #             15472 Willie Yee has SIDE DOOR in old address but missing in new.
     # 12/16/2025. 17190. Caneled order for 'Joes half assed scopes'. has 'cancelledAt': '2025-12-04T17:39:18Z'.
+    # 3/10/2026.  17712. first order of neaf_vendor_booth_premium_from_standard_early_bird but before "My Company Name" added. I editted email from hqu@spectrumoi.com to hincequ@gmail.com.
 
     url,headers = get_url_and_headers()
     req = ORDER_BY_NAME
@@ -132,12 +131,36 @@ def graphql_order_by_name_test(name='17204'):
         print(res_str)
     return
 
+def inject_test_custom_attribute_by_order_num(order_num=15264, key=FAKE_TEST_KEY, value=FAKE_TEST_VALUE, delete_key=False):
+
+    msg,order_id,success,customAttributes = load_and_adjust_custom_attributes(order_num,key,value=value,delete_key=delete_key)
+    print(msg)
+    if success:
+        success2,msg2 = mutate_custom_attributes(order_num, order_id, customAttributes)
+        print(f'success:{success2}')
+        print(msg2)
+
+    return
+
+def show_existing_custom_attribute_by_order_num(order_num=15264):
+    key = ''
+    msg,order_id,success,customAttributes = load_and_adjust_custom_attributes(order_num,key)
+    print(f'msg:\n{msg}')
+    print(f'order_num:{order_num}, order_id:{order_id}')
+    print(f'success:{success}')
+    print(f'customAttributes:\n{pprint.pformat(customAttributes, width=200)}')
+    return
+
 def main():
-    #rest_api()
     #graphql_orders_by_sku_between_dates()
-    graphql_orders_between_dates()
+    #graphql_orders_between_dates()
     #graphql_order_by_order_id_test()
-    #graphql_order_by_name_test()
+    #graphql_order_by_order_num_test()
+    #show_existing_custom_attribute_by_order_num()
+    # 4/2/2026. inject non-conforming customAttribute of {'key': 'fake_test_key', 'value': 'fake_test_value'}
+    #inject_test_custom_attribute_by_order_num()
+    # 4/2/2026. delete fake badge edit {'key': 'Badge_Name_15264_4', 'value': 'Moshe Yisroel'}.
+    inject_test_custom_attribute_by_order_num(key='Badge_Name_15264_4',value=None,delete_key=True)
     return
 
 main()

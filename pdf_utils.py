@@ -2,7 +2,7 @@
 
 r'''
 documentation on web said run
-pip import fpdf
+pip install fpdf
 but it failed in hoboken, worked in rockland the 2nd time I tried. Instead I used
 pip install fpdf
 http://www.fpdf.org/en/doc/index.php   seems pretty good
@@ -26,12 +26,16 @@ C:\Windows\System32\cmd.exe /c start "reader:"
 '''
 
 import os
+import time
 from datetime import timedelta
 from dateutil import parser
 # install with
 # pip install fpdf
 from fpdf import FPDF
-from utils import DOOR_PRIZE_WINNER,pdf_path,get_default_neaf_year
+# install with
+# pip install psutil
+import psutil
+from utils import pdf_path
 
 WINNERS_PER_ROW = 3
 # use these 2 values to override screen dimensions derive from FPDF results
@@ -87,14 +91,14 @@ def show_an_hours_winners(p,min_x,max_x,hour,winners):
     p.cell(10,3,'',align='C',ln=1)
     return
 
-def build_doorprize_winner_pdf(all_winners):
+def build_doorprize_winner_pdf(all_winners,neaf_year,neaf_day_of_week):
 
     p = init_page()
     min_x,max_x,center_x,max_y,pg_comment = get_page_geometry(p)
 
     p.set_font('Arial','B',35)
     p.set_x(center_x-70)
-    heading = 'NEAF {0} Door Prize Winners'.format(get_default_neaf_year())
+    heading = 'NEAF {0}, {1} Door Prize Winners'.format(neaf_year,neaf_day_of_week)
     p.cell(140,20,heading,align='C',ln=1)
     p.set_y(p.get_y()+10)
     p.set_font('Arial','B',15)
@@ -108,7 +112,7 @@ def build_doorprize_winner_pdf(all_winners):
     p.set_text_color(r=0,g=200,b=100)
     p.cell(1,1,'Congratulations Winners',align='C')
 
-    fname = pdf_path()
+    fname = pdf_path(neaf_year,neaf_day_of_week)
     p.output(fname,'F')
     # 4/8/2023. displaying the pdf doesn't seem to work well anymore. it freezes the app. force the user to open each pdf manually after building it with 'Build Winners PDF'.
     #os.system(fname)
@@ -125,13 +129,38 @@ def get_hour(CONFIRM_NOTE):
     hour = hour[1:] if hour[0:1] == '0' else hour
     return hour,hour_int
 
-def build_winners_pdf(dp_src_winner):
+def kill_acrobat():
+    # 3/15/2026. Kill any running Adobe Acrobat / Reader processes so that previously opened PDFs do not lock the output file.
+
+    targets = {"acrord32.exe", "acrobat.exe", "acrocef.exe"}
+    comments = []
+
+    process_killed_cnt_map = {}
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            name = proc.info['name']
+            if name and name.lower() in targets:
+                process_killed_cnt_map[name] = process_killed_cnt_map.get(name,0) + 1
+                proc.kill()
+        except psutil.NoSuchProcess:
+            comments.append(f"For some unknown reason killing {name} failed with exception psutil.NoSuchProcess. God knows I can't explain it.")
+        except psutil.AccessDenied:
+            comments.append(f"For some unknown reason killing {name} failed with exception psutil.AccessDenied. God knows I can't explain it.")
+    if not process_killed_cnt_map:
+        comments.append('No Acrobat process were running so known need to be killed.')
+    else:
+        for name,cnt in process_killed_cnt_map.items():
+            comments.append(f"Killing {cnt} instances of {name} process.")
+    return '\n'.join(comments)
+
+def build_winners_pdf(dp_src_winner,neaf_year,neaf_day_of_week):
 
     # first kill prior running pdf display before building new file
-    os.system('taskkill /f /im AcroRd32.exe')
+    comment1 = kill_acrobat()
+    time.sleep(2)
 
     all_winners_dict = {}
-    for dpt in list(dp_src_winner.values()):
+    for dpt in dp_src_winner.values():
         winner = dpt.name
         hour,hour_int = get_hour(dpt.CONFIRM_NOTE)
         all_winners_item = all_winners_dict.get(hour_int,(hour,[]))
@@ -139,9 +168,16 @@ def build_winners_pdf(dp_src_winner):
             all_winners_dict[hour_int] = all_winners_item
         all_winners_item[1].append(winner)
     all_winners = []
+    all_winners_times = []
+    winners_cnt = 0
     for hour_int,all_winners_item in all_winners_dict.items():
+        winners_cnt += len(all_winners_item[1])
+        all_winners_times.append(all_winners_item[0])
         all_winners.append(all_winners_item)
-    comment = build_doorprize_winner_pdf(all_winners)
+    drawings_str = ', '.join(all_winners_times)
+    comment2 = f'Build pdf with {winners_cnt} winners distributed over {len(all_winners_times)} drawings at {drawings_str}.\n'
+    comment3 = build_doorprize_winner_pdf(all_winners,neaf_year,neaf_day_of_week)
+    comment = comment1 + comment2 + comment3
     return comment
 
 def main():
@@ -156,7 +192,9 @@ def main():
         ('5PM',['manfred bruenjes','Linda Shore','Mia Ishikawa','Serguei Antonov','Robert Kolbet']),
         ('6PM',['manfred bruenjes','Linda Shore','Mia Ishikawa','Serguei Antonov','Robert Kolbet','Jeff Simon'])
         ]
-    comment = build_doorprize_winner_pdf(all_winners)
+    neaf_year = 2025
+    neaf_day_of_week = 'Saturday'
+    comment = build_doorprize_winner_pdf(all_winners,neaf_year,neaf_day_of_week)
     print(comment)
     return
 # comment out main before copying to RAC_share

@@ -1,153 +1,22 @@
 
 import csv
-import json
-from dateutil import parser
 import datetime
-# install with
-# pip install requests
-import requests
 import tracemalloc
-
-# 2/6/2022. inferior spell check methods.
-# install with
-# pip install pyspellchecker
-#from spellchecker import SpellChecker
-# install with
-# pip install pyenchant
-# pip install pyenchant
-# use pip3 on mac
-#import enchant # not interesting, it suggested replacing both Willmann and Wlllmann with Mailman
-
-# install with
-# pip install autocorrect
-# use pip3 on mac
-from autocorrect import Speller
-from difflib import SequenceMatcher
 import tempfile
 import os
-import re
 import copy
-from consts import NEAF_VENDOR,NEAF_MANAGMENT,NEAF_FULL,NEAF_RAW,NEAF_COMPANY_BADGE,NEAF_YEAR_DEFAULT,REFUND,N_A
-from utils import get_date,NeafVendorCollectionsTup,show_dict,show_neaf_vendor_dict,NeafVendorTup,USE_GRAPHQL
-from utils import NeafSSTup,writerow_UnicodeEncodeError,RAC_DIR,ERROR,STARS,nvtDesc,NOTE_ATTRIBUTE_KEY,PROPERTIES_KEY
+from consts import NEAF_VENDOR,NEAF_VENDOR,NEAF_FULL,NEAF_RAW,NEAF_COMPANY_BADGE,NEAF_YEAR_DEFAULT,REFUND,N_A
+from utils import get_date,NeafVendorCollectionsTup,show_dict,show_neaf_vendor_dict,NeafVendorTup,getCurrencySymbolFromCode
+from utils import NeafSSTup,writerow_UnicodeEncodeError,RAC_DIR,ERROR,STARS,nvtDesc,NOTE_ATTRIBUTE_KEY,CUSTOM_ATTRIBUTES_KEY
 from neaf_vendor_utils import useOrderNoteAttributeEdits,getNamesFromOrderProperty,setAddress,setName,setCost,setOrderDetails,setOrderProperties,useNameFromAttribute
-from neaf_vendor_utils import addItemToNvtDict,set_vendor_properties_tup,mergedNvts,mergedDiscounts,getBadgeEntitledCntAndNames,removeBadgesFromRefundedOrders,applyBadgeNameEdits
+from neaf_vendor_utils import addItemToNvtDict,set_vendor_properties_tup,mergeNvts,mergedDiscounts,getBadgeEntitledCntAndNames,removeBadgesFromRefundedOrders,applyBadgeNameEdits
 from neaf_vendor_utils import convert_neafVendorTup_to_processed,get_distinct_order_properties,item_count_description,build_address_text,normalize_big_string
 from neaf_vendor_utils import displayLargeStringWithMargin,dash_string,goodDatetimeStr,buildCompanyBadgeList,buildLastOrderDateVendorsMap,convertToKey,save_invoice,get_vendor_sign_in_row
-from neaf_vendor_utils import invoice_subdir,getNormalizedBadgeNames,updateOrderNoteAttributes,DONATION_SKU,EXCLUDE_SKU
+from neaf_vendor_utils import invoice_subdir,getNormalizedBadgeNames,updateOrderNoteAttributes,DONATION_SKU,EXCLUDE_SKU,appendError
 from neaf_vendor_utils import INCOMPATIBLE_ACTIONS,VALID_EDIT_ACTIONS,EDIT_ACTION_TO_ACTION_MAP,BADGE,DELETE_ORIGINAL_BADGE,EMAIL,DESC_FOR_ACTION_NEEDING_1_ORDER,DELETE_PRIOR_EDIT
 from neaf_vendor_utils import DELETE_ORIGINAL_BADGE_ACTION,DELETE_ORIGINAL_ORDER_NOTE,ORDER_NOTE,NAME
+from order_num_to_company import buildOrderNumToCompanyMap
 from access_shopify import AccessShopify
-
-
-def getBestCompany(companies, companyFromAttributeToOrderNumMap):
-
-    def getMostToksCompany(companies):
-        tokCnt = []
-        for c in companies:
-            c = '' if c is None else c
-            tokCnt.append(len(c.split()))
-        tokCnt = sorted(tokCnt, reverse=True)
-        if tokCnt[0] > tokCnt[1]:
-            # we have a company name of maximum tokens. use it
-            for c in companies:
-                c = '' if c is None else c
-                if len(c.split()) == tokCnt[0]:
-                    return c
-            raise Exception('bug in getMostToksCompany processing {0}'.format(companies))
-        return ''
-
-    def getCompanyFromAttribute(companies, companyFromAttributeToOrderNumMap):
-        companies_from_attributes = []
-        error = False
-        company = None
-        comment = None
-        companyFromAttributeDesc = ''
-        for comp in companies:
-            order_nums = companyFromAttributeToOrderNumMap.get(comp)
-            if order_nums:
-                companies_from_attributes.append(comp)
-                delim = ', ' if companyFromAttributeDesc else ''
-                companyFromAttributeDesc += '{0}{1}:{2}'.format(delim, comp, ','.join([str(o_n) for o_n in order_nums]))
-        if not companies_from_attributes:
-            pass
-        elif len(companies_from_attributes) == 1:
-            company = companies_from_attributes[0]
-            order_nums = companyFromAttributeToOrderNumMap.get(company)
-            order_num_str = 'order_num {0}'.format(order_nums[0]) if len(order_nums) == 1 else 'order_nums {0}'.format(','.join([str(o_n) for o_n in order_nums]))
-            comment = "Use '{0}' from {1} because it is company name from order_note_attributes for {2}.".format(company, companies, order_num_str)
-        else:
-            comment = 'it is not possible to pick one of {0} as best company name using companies from order note attributes.\n' +\
-                'We can only do that if a single one of these companies had been set as an order note attribute but these companies were set as order note attributes in these orders:\n{1}'
-            comment = comment.format(companies,companyFromAttributeDesc)
-            error = True
-        return company, comment, error
-
-    def getOneMixedCaseCompany(companies):
-        mixedCaseCompanies = []
-        for company in companies:
-            toks = company.split()
-            for tok in toks:
-                mixedCase = tok.upper() != tok and tok.lower() != tok
-                if mixedCase:
-                    mixedCaseCompanies.append(company)
-                    break
-        return mixedCaseCompanies[0] if len(mixedCaseCompanies) == 1 else ''
-
-    def getOneBestSpelledCompany(companies):
-        spell = Speller(lang='en')
-        companyToSpellingQualityCntMap = {}
-
-        for company in companies:
-            c = company.replace('-', ' ').replace(',', ' ').replace('.', ' ')
-            toks = c.split()
-
-            spellingQuality = 0.0
-            numToks = len(toks)
-            for tok in toks:
-                tokSpelled = spell(tok)
-                if tokSpelled == tok:
-                    spellingQuality += 1. / numToks
-                else:
-                    closeness = SequenceMatcher(a=tokSpelled, b=tok).ratio()
-                    spellingQuality += closeness / numToks
-
-            companyToSpellingQualityCntMap[company] = spellingQuality
-
-        # pick company of highest spelling quality.
-        bestSpellingQuality = 0.0
-        bestCompany = None
-        for company, spellingQuality in companyToSpellingQualityCntMap.items():
-            if abs(spellingQuality - bestSpellingQuality) <= 0.0001:
-                # we have more than 1 company with the same best spelling quality. give up in defaeat.
-                return ''
-            if spellingQuality > bestSpellingQuality:
-                bestSpellingQuality = spellingQuality
-                bestCompany = company
-
-        return bestCompany
-
-    error = False
-    company, comment, error = getCompanyFromAttribute(companies, companyFromAttributeToOrderNumMap)
-    if error:
-        return company, comment, error
-    if company:
-        return company, comment, error
-    company = getMostToksCompany(companies)
-    if company:
-        comment = "Use '{0}' which is company name of most tokens in {1}".format(company, companies)
-        return company, comment, error
-    company = getOneMixedCaseCompany(companies)
-    if company:
-        comment = "Use '{0}' which is mixed case company name of companies:{1}".format(company, companies)
-        return company, comment, error
-    company = getOneBestSpelledCompany(companies)
-    if company:
-        comment = "Use '{0}' which is best spelled company name of companies:{1}".format(company, companies)
-        return company, comment, error
-    company = ' | '.join(companies)
-    comment = "Failed to find best company of {0}. Give up and return concatenation of '{1}'.".format(companies,company)
-    return company, comment, error
 
 class NEAFVendor(AccessShopify):
 
@@ -179,13 +48,16 @@ class NEAFVendor(AccessShopify):
             #print 'xx'
             pass
 
-        order_num,created_at,sku,quantity,CONFIRM_NOTE,\
+        (order_num,created_at,sku,quantity,CONFIRM_NOTE,\
             name,address1,address2,address3,phone_num,\
-            email,booth_st_qty,booth_st,booth_prem_qty,booth_prem,extra_tables_qty,\
-            extra_tables,extra_chairs_qty,extra_chairs,elec,carpet,additional_badges_qty,additional_badges,wifi,shipping_box,\
-            shipping_pallet,sponsorship,donation,declined_neaf_2023,prize_donation,prize_donation_value,total_cost,paid,total_due,check_number,total_discounts,discount_codes,booth_comments,\
-            sales_comments,error,shipping_box_qty,shipping_pallet_qty,order_note,debug,order_details,order_properties,\
-            badge_names_orig,badge_entitled_cnt,badge_names = [None]*49
+            email,booth_st_qty,booth_st,booth_prem_qty,booth_prem,upgrade_st_to_prem_qty,upgrade_st_to_prem,total_adj_booth_qty, get_booths_from,\
+            extra_tables_qty,extra_tables,extra_chairs_qty,extra_chairs,elec,carpet,additional_badges_qty,additional_badges,wifi,shipping_box,\
+            shipping_pallet,sponsorship,donation,declined_neaf_2023,prize_donation,prize_donation_value, \
+            currencyCode,total_cost,paid,total_due,\
+            check_number,total_discounts,iscount_codes,booth_comments,sales_comments,error,
+            total_cost_presentment,paid_presentment,total_due_presentment,total_discounts_presentment,\
+            shipping_box_qty,shipping_pallet_qty,order_note,debug,order_details,order_properties,\
+            badge_names_orig,badge_entitled_cnt,badge_names) = [None]*58
 
         order_num = sct.order_num
         # 12/27/2022. Bizzarely order_num is in there twice, 2nd time its orderNumber. that's the simplest way of getting it into the s/s in the current framework where s/s fields run
@@ -200,7 +72,8 @@ class NEAFVendor(AccessShopify):
         name = sct.name
         email = sct.email
         phone_num = sct.phone_num
-        total_discounts = sct.total_discounts
+        total_discounts             = sct.total_discounts
+        total_discounts_presentment = sct.total_discounts_presentment
         discount_codes = sct.discount_codes
         default_address = sct.default_address
         refund_note = sct.refund_note
@@ -212,9 +85,11 @@ class NEAFVendor(AccessShopify):
         order_num_to_donation_map = {}
         company = default_address.get('company') if default_address.get('company') else ''
 
-        properties = sct.line_item.get(PROPERTIES_KEY())
-        nvpt = set_vendor_properties_tup(properties,order_num,name,email)
+        properties = sct.line_item.get(CUSTOM_ATTRIBUTES_KEY())
+        nvpt = set_vendor_properties_tup(properties)
         #requested_booth_loc = nvpt.requested_booth_loc
+        if nvpt.get_booths_from:
+            get_booths_from = nvpt.get_booths_from
         if nvpt.prize1:
             prize_donation = nvpt.prize1
         if nvpt.prize2:
@@ -229,18 +104,19 @@ class NEAFVendor(AccessShopify):
         last_order_date = created_date
 
         # TODO 3/25/2023. Keep NeafVendorTup usage here in sync with usage in NEAF_VENDOR_FIELDS in utils.py near line 58
-        #  NEAF s/s fields runs from company to error
+        #                 NEAF s/s fields runs from company to error
 
         nvt = NeafVendorTup(order_num, created_at, sku, quantity, CONFIRM_NOTE,
 
                             nvpt.company_from_property, company_from_attribute,name_from_attribute,
 
                             company, last_order_date, orderNumber, name, address1, address2, address3, phone_num, nvpt.cellno,
-                            email, booth_st_qty, booth_st, booth_prem_qty, booth_prem, extra_tables_qty,
-                            extra_tables, extra_chairs_qty, extra_chairs, elec, carpet, additional_badges_qty, additional_badges, wifi, shipping_box,
+                            email, booth_st_qty, booth_st, booth_prem_qty, booth_prem, upgrade_st_to_prem_qty, upgrade_st_to_prem, total_adj_booth_qty, get_booths_from,
+                            extra_tables_qty, extra_tables, extra_chairs_qty, extra_chairs, elec, carpet, additional_badges_qty, additional_badges, wifi, shipping_box,
                             shipping_pallet, sponsorship, donation, donation_order_from_attribute, exclude_order_from_attribute, declined_neaf_2023, prize_donation, prize_donation_value,
-                            total_cost,paid, total_due, check_number, total_discounts, discount_codes, booth_comments, sales_comments, order_note, nvpt.error,
+                            currencyCode, total_cost, paid, total_due, check_number, total_discounts, discount_codes, booth_comments, sales_comments, order_note, nvpt.error,
 
+                            total_cost_presentment,paid_presentment,total_due_presentment,total_discounts_presentment,
                             shipping_box_qty, shipping_pallet_qty, order_num_to_donation_map, order_note_attributes, order_id,refund_note, refund_created_at,
                             nvpt.name_on_badge, nvpt.badge1_name, nvpt.badge2_name, extra_badge_names, badge_names_orig, badge_entitled_cnt, badge_names,
                             first_order_date, debug, order_details, order_properties)
@@ -279,7 +155,7 @@ class NEAFVendor(AccessShopify):
             orig_nvt = full.get(company)
             if orig_nvt:
                 # this function used here to collapse many orders that a single company might make under a single company entry in orig_nvt
-                orig_nvt = mergedNvts(orig_nvt,nvt)
+                orig_nvt = mergeNvts(orig_nvt, nvt)
                 # special processing needed to merge discounts.
                 orig_nvt = mergedDiscounts(orig_nvt,nvt)
             else:
@@ -297,6 +173,58 @@ class NEAFVendor(AccessShopify):
                 full[nvt.company] = nvt
 
         return full
+
+    def populateTotalAdjBoothQty(self,full):
+
+        # TODO 3/18/2026. implement this function that error checks, calcs and sets NEAFVendorTup.total_adj_booth_qty. for the majority of companies this field is simply the sum of
+        #                 booth_st_qty and booth_prem_qty. upgrade_st_to_prem_qty does not contribute. set error if insufficient number of standard booths to upgrade.
+        #                 loop through full and find all target orders in get_booths_from. for now only the "Extra Spreadsheet Row" product with sku:neaf_vendor_booth_extra_ss_row uses
+        #                 get_booths_from. confirm those orders are real. confirm no duplicate orders used in get_booths_from inside a company.
+        #                 confirm sufficient booths in the get_booths_from order to divert to requesting order
+        #                 Some valid sample orders with get_booths_from:
+        #                    1) 17724 (Astro-Tech, quan:1) with get_booths_from of 17376 (Astronomics,    quan: stan:1, prem:3)
+        #                    2) 17728 (10 Micron,  quan:1) with get_booths_from of 17377 (Woodland Hills, quan: prem:2)
+        #                    3) 17729 (Sky Rover,  quan:1) with get_booths_from of 17376 (Astronomics,    quan: stan:1, prem:3)
+        #                 duplicates are allowed across companies since a single company with many booths can feed many "Extra Spreadsheet Row" companies.
+
+        # 4/2/2026. this block processes items in full dict that have nvt.get_booths_from set.
+
+        full_adjusted = {}
+        get_booths_from_company_items = {}
+        for company,nvt in full.items():
+            if nvt.get_booths_from:
+                if not nvt.get_booths_from.isdigit():
+                    nvt = appendError(nvt,f"get_booths_from:'{nvt.get_booths_from}' is invalid. It must be an integer.")
+                else:
+                    # 4/2/2026: some orders that hit this block include 17724, 17728, 17729.
+                    get_booths_from = int(nvt.get_booths_from)
+                    get_booths_from_company = self.orderNumToCompanyMap.get(get_booths_from)
+                    if not get_booths_from_company:
+                        # 4/2/2026. no use case yet for this block. when one is found document it here.
+                        nvt = appendError(nvt,f"get_booths_from:{get_booths_from} is invalid. No company in NEAFVendor.orderNumToCompanyMap exists for this order_num.")
+                    else:
+                        gbfc_items = get_booths_from_company_items.get(get_booths_from_company,[])
+                        if not gbfc_items:
+                            get_booths_from_company_items[get_booths_from_company] = gbfc_items
+                        gbfc_item = (company,nvt.order_num,nvt.quantity)
+                        gbfc_items.append(gbfc_item)
+
+                full_adjusted[company] = nvt
+
+        if full_adjusted:
+            full.update(full_adjusted)
+
+        for company,nvt in full.items():
+            booth_st_qty = nvt.booth_st_qty if nvt.booth_st_qty else 0
+            booth_prem_qty = nvt.booth_prem_qty if nvt.booth_prem_qty else 0
+            tot_booth_qty = booth_st_qty + booth_prem_qty
+            upgrade_st_to_prem_qty = nvt.upgrade_st_to_prem_qty
+            total_adj_booth_qty = nvt.total_adj_booth_qty
+            get_booths_from = nvt.get_booths_from
+            get_booths_from_company = self.orderNumToCompanyMap.get(get_booths_from)
+
+
+        return
 
     def build_neaf_vendor_processed_dict_from_full(self,full):
         neaf_ss = {}
@@ -382,7 +310,7 @@ class NEAFVendor(AccessShopify):
             invoice += '{0}BOOTH COMMENTS:\n'.format(margin)
             invoice += '{0}{1}\n\n'.format(margin,nvt.booth_comments)
 
-        order_detail_format = '{:4s}{:5s} {:19s} {:45s} {:8s} {:8s}\n'
+        order_detail_format = '{:4s}{:5s} {:16s} {:48s} {:8s} {:8s}\n'
         header1 = ('','Order','Order',    'SKU','Quantity','Unit')
         header2 = ('','No.',  'Date/Time','',   '',        'Price')
         header1 = order_detail_format.format(*header1)
@@ -399,13 +327,15 @@ class NEAFVendor(AccessShopify):
         exclude_orders = nvt.exclude_order_from_attribute.split('|') if nvt.exclude_order_from_attribute else []
         found_donation_orders = []
         found_exclude_orders = []
+        csym = getCurrencySymbolFromCode(nvt.currencyCode)
         for order_detail in nvt.order_details:
+            csym_od = getCurrencySymbolFromCode(order_detail.currencyCode)
             if order_detail.order_num in donation_orders and 'sponsor' not in order_detail.sku:
                 if order_detail.order_num in found_donation_orders:
                     continue
                 found_donation_orders.append(order_detail.order_num)
-                donation = nvt.order_num_to_donation_map[order_detail.order_num]
-                invoice_line = order_detail_format.format(margin, order_detail.order_num,goodDatetimeStr(order_detail.created_at), DONATION_SKU,'1','${:.2f}'.format(donation))
+                donation = str(round(nvt.order_num_to_donation_map[order_detail.order_num]))
+                invoice_line = order_detail_format.format(margin, order_detail.order_num,goodDatetimeStr(order_detail.created_at), DONATION_SKU,'1','$'+donation)
             elif order_detail.order_num in exclude_orders:
                 if order_detail.order_num in found_exclude_orders:
                     continue
@@ -413,22 +343,23 @@ class NEAFVendor(AccessShopify):
                 invoice_line = order_detail_format.format(margin, order_detail.order_num,goodDatetimeStr(order_detail.created_at), EXCLUDE_SKU,'','')
             else:
                 invoice_line = order_detail_format.format(margin,order_detail.order_num,goodDatetimeStr(order_detail.created_at),order_detail.sku,
-                    str(order_detail.quantity),'${:.2f}'.format(order_detail.unit_price))
+                                                          str(order_detail.quantity),csym_od + str(round(order_detail.unit_price_presentment)))
             invoice_line = margin + invoice_line[len(margin):]
             invoice += invoice_line
 
-        total_discounts = '${:.2f}'.format(nvt.total_discounts)
+        total_discounts = str(round(nvt.total_discounts))
         #tdue = '${:.2f}'.format(nvt.total_due)
         discount_str = '   Discount:{0} with Discount Code {1}   '.format(total_discounts,nvt.discount_codes) if nvt.total_discounts else '   '
 
         invoice += '\n'
-        total_due = '$0.00' if nvt.total_due is None else '${:.2f} by check mailed to Rockland Astronomy Club'.format(nvt.total_due)
-        invoice += '{0}TOTAL COST:{1}{2}TOTAL PAID:{3}   TOTAL DUE:{4}\n'.format(margin,'${:.2f}'.format(nvt.total_cost),discount_str,'${:.2f}'.format(nvt.paid),total_due)
+        total_due = csym +'0' if nvt.total_due_presentment is None else str(round(nvt.total_due_presentment)) + ' by check mailed to Rockland Astronomy Club'
+        invoice += '{0}TOTAL COST:{1}{2}TOTAL PAID:{3}   TOTAL DUE:{4}\n'.format(margin,csym+str(round(nvt.total_cost_presentment)),discount_str,
+                                                                                 csym+str(round(nvt.paid_presentment)),total_due)
         invoice += '{0}\n'.format(margin)
 
         invoice += '{0}SKU Descriptions\n'.format(margin)
         invoice += '{0}{1}\n'.format(margin,dash_string(41+1+98))
-        sku_description_format = '{:4s}{:45s} {:98s}\n'
+        sku_description_format = '{:4s}{:47s} {:98s}\n'
         skus_displayed = []
         for order_detail in nvt.order_details:
             if order_detail.sku in skus_displayed or order_detail.sku==REFUND:
@@ -461,6 +392,9 @@ class NEAFVendor(AccessShopify):
             invoice += '{:4s}{:14s}     {:s}\n'.format(margin, str(nvt.prize_donation_value), str(nvt.prize_donation))
             invoice += '\n'
 
+        if nvt.get_booths_from:
+            invoice += f'Booths in this order come from order #{nvt.get_booths_from}\n'
+
         # this function only returns last_order_date for those customers requesting an invoice. It is used to run function that outputs
         # all invoices for customers that want only for customers whose last order beyond a given date
         return invoice,last_order_date
@@ -474,440 +408,22 @@ class NEAFVendor(AccessShopify):
                 vendor_last_order_date_map[key] = last_order_date
         return vendor_invoices,vendor_last_order_date_map
 
-    # START OF COMPANY NAME MANAGEMENT FUNCTIONS ***************************************************************************************
-
-    def buildItemToDuplicateCompanyMap(self,orderNumToCompanyMap,itemToOrderNumMap):
-        itemToDuplicateCompanyMap = {}
-        for item,orderNums in itemToOrderNumMap.items():
-            if len(orderNums) == 1:
-                continue
-            companies = [orderNumToCompanyMap.get(order_num) for order_num in orderNums if orderNumToCompanyMap.get(order_num)]
-            companies = set(companies)
-            if len(companies) <= 1:
-                continue
-            itemToDuplicateCompanyMap[item] = list(companies)
-        return itemToDuplicateCompanyMap
-
-    def buildItemToDuplicateCompanyFromPropertyMap(self,orderNumToCompanyFromPropertyMap,itemToOrderNumMap,companyFromAttributeToOrderNumMap):
-        itemToDuplicateCompanyFromPropertyMap = {}
-        for item,orderNums in itemToOrderNumMap.items():
-            companies = []
-            for order_num in orderNums:
-                companiesFromProperty = orderNumToCompanyFromPropertyMap.get(order_num,[])
-                companies.extend([companyFromProperty for companyFromProperty in companiesFromProperty if companyFromProperty])
-
-            companies = set(companies)
-            if len(companies) <= 1:
-                continue
-            itemToDuplicateCompanyFromPropertyMap[item] = list(companies)
-
-        for item,companies in itemToDuplicateCompanyFromPropertyMap.items():
-            company,comment,error = getBestCompany(companies,companyFromAttributeToOrderNumMap)
-            if error:
-                self.error += '\n' + comment if self.error else comment
-            if comment:
-                print(comment)
-            itemToDuplicateCompanyFromPropertyMap[item] = company
-
-        return itemToDuplicateCompanyFromPropertyMap
-
-    def findDuplicateIdentifiers(self,orderNumToCompanyMap,itemLabel,itemToOrderNumMap):
-        itemToDuplicateCompanyMap = self.buildItemToDuplicateCompanyMap(orderNumToCompanyMap,itemToOrderNumMap)
-        for item,companies in itemToDuplicateCompanyMap.items():
-            orderNums = itemToOrderNumMap[item]
-            msg = "The {0} {1} with orderNums {2} is associated with companies {3}. THAT'S ODD THAT THE SAME {0} IS ASSOCIATED WITH {4} COMPANIES."
-            msg = msg.format(itemLabel,item,orderNums,companies,len(companies))
-            print(msg)
-        return
-
-    def improveCompanyFromPropertyWithOtherItem(self,itemLabel,companyFromPropertyToOrderNumMap,orderNumToCompanyFromPropertyMap,itemToOrderNumMap,companyFromAttributeToOrderNumMap):
-        #itemToDuplicateCompanyFromPropertyMap = self.buildItemToDuplicateCompanyFromPropertyMap(orderNumToCompanyFromPropertyMap,itemToOrderNumMap,companyFromAttributeToOrderNumMap)
-
-
-        itemToDuplicateCompanyFromPropertyMap = {}
-        for item, orderNums in itemToOrderNumMap.items():
-            companies = []
-            for order_num in orderNums:
-                companiesFromProperty = orderNumToCompanyFromPropertyMap.get(order_num, [])
-                companies.extend([companyFromProperty for companyFromProperty in companiesFromProperty if companyFromProperty])
-
-            companies = set(companies)
-            if len(companies) <= 1:
-                continue
-            itemToDuplicateCompanyFromPropertyMap[item] = list(companies)
-
-        itemToDuplicateCompanyFromPropertyMap_improved = {}
-        for item, companies in itemToDuplicateCompanyFromPropertyMap.items():
-            company, comment, error = getBestCompany(companies, companyFromAttributeToOrderNumMap)
-            if comment:
-                comment = "Using {0} of '{1}' ".format(itemLabel,item) + comment
-                print(comment)
-            if not error:
-                itemToDuplicateCompanyFromPropertyMap_improved[item] = company
-
-        # 4/2/2023. we have improved itemToDuplicateCompanyFromPropertyMap using getBestCompany in above loop. those improved items are in itemToDuplicateCompanyFromPropertyMap_improved.
-        # upgrade itemToDuplicateCompanyFromPropertyMap with those improved items:
-        itemToDuplicateCompanyFromPropertyMap.update(itemToDuplicateCompanyFromPropertyMap_improved)
-
-        first = True
-        for item,companyFromProperty in itemToDuplicateCompanyFromPropertyMap.items():
-            if isinstance(companyFromProperty,list):
-                # 4/3/2023. we have failed to find a best company for this item. an example is itemLabel of 'name' with name of 'Emily Rice'. We arrive here with companyFromProperty
-                # ['STARtorialist, Inc.', 'CUNY Astronomy']. This failure is expected because, oddly enough, Emily Rice is associated with these 2 completely different companies.
-                continue
-            orderNums = itemToOrderNumMap[item]
-            companies = []
-            for orderNum in orderNums:
-                company_from_map = orderNumToCompanyFromPropertyMap.get(orderNum)
-                if not company_from_map:
-                    # 3/22/2025. this block added for Dwarf Lab order 15601. its for Advertising $50 to $2000. No mandatory company in product(from App of "PC - Product Optiobns")
-                    #            so no entry in orderNumToCompanyFromPropertyMap. they have total of 3 orders: 15355, 15601, 15782
-                    continue
-                companies.extend(company_from_map)
-            # companies = set(companies)
-            # msg = "{0} of {1} in orderNums {2} has best companyFromProperty of '{3}' that will replace these companyFromProperties of {4}"
-            #print(msg.format(itemLabel,item,orderNums,companyFromProperty,companies))
-            for orderNum in orderNums:
-                old_companyFromProperties = orderNumToCompanyFromPropertyMap.get(orderNum)
-                if not old_companyFromProperties:
-                    # 3/22/2025. this block added for Dwarf Lab order 15601. its for Advertising $50 to $2000. No mandatory company in product(from App of "PC - Product Optiobns")
-                    #            so no entry in orderNumToCompanyFromPropertyMap. they have total of 3 orders: 15355, 15601, 15782
-                    continue
-                if len(old_companyFromProperties)==1 and old_companyFromProperties[0] == companyFromProperty:
-                    # no need to make any improvement to companyFromProperty for orderNum. it already matches the improved value
-                    continue
-                msg = "Using {0} of '{1}' to replace old value of orderNumToCompanyFromPropertyMap[{2}] of {3} with ['{4}']."
-                print(msg.format(itemLabel,item,orderNum,old_companyFromProperties,companyFromProperty))
-                orderNumToCompanyFromPropertyMap[orderNum] = [companyFromProperty]
-
-        # invert orderNumToCompanyFromPropertyMap and re-populate companyFromPropertyToOrderNumMap
-
-        companyFromPropertyToOrderNumMap.clear()
-        for orderNum,companiesFromProperties in orderNumToCompanyFromPropertyMap.items():
-            for companyFromProperty in companiesFromProperties:
-                cfp_list = companyFromPropertyToOrderNumMap.get(companyFromProperty,[])
-                if not cfp_list:
-                    companyFromPropertyToOrderNumMap[companyFromProperty] = cfp_list
-                cfp_list.append(orderNum)
-
-        return
-
-    def companySanityCheck(self,orderNumToCompanyMap,emailToOrderNumMap,nameToOrderNumMap):
-        # 2/7/2022. do sanity check of company names. nothing in this function is used for implementing this system.
-
-        companies =  set(orderNumToCompanyMap.values())
-        print('{0} distinct companies distributed over {1} distinct orders.'.format(len(companies),len(orderNumToCompanyMap)))
-        print('{0} distinct emails, {1} distinct names'.format(len(emailToOrderNumMap),len(nameToOrderNumMap)))
-
-        self.findDuplicateIdentifiers(orderNumToCompanyMap,'email',emailToOrderNumMap)
-        self.findDuplicateIdentifiers(orderNumToCompanyMap,'name',nameToOrderNumMap)
-
-        return
-
     def buildOrderNumToCompanyMap(self,raw):
 
-        # 2/6/2022. this function builds self.orderNumToCompanyMap which is used inside of build_neaf_vendor_full_dict_from_shopify to combine items in raw dict(keyed by order_num)
+        # 2/6/2022. this function builds self.orderNumToCompanyMap dict which is used inside of build_neaf_vendor_full_dict_from_shopify to combine items in raw dict(keyed by order_num)
         # into items in full dict(keyed by company name)
-
-        def appendToKeyToOrderNumListMap(keyToOrderNumListMap,key,order_num):
-            orderNumList = keyToOrderNumListMap.get(key,[])
-            if not orderNumList:
-                keyToOrderNumListMap[key] = orderNumList
-            if order_num not in orderNumList:
-                orderNumList.append(order_num)
-            return
-
-
-        def populate2MapsForKeyAndOrderNum(keyToOrderNumListMap,orderNumToKey,key,order_num,bothAreLists=False):
-
-            # populate key->order_num list and order_num->key or key listmaps with passed in key and order_num
-            # bothAreLists defaults to False because a given orderNum tends to map to a single key in orderNumToKey however it can be a list just as keyToOrderNumListMap maps to list.
-            # if so pass in bothAreLists to True.
-
-            if not key:
-                return
-
-            appendToKeyToOrderNumListMap(keyToOrderNumListMap,key,order_num)
-
-            if bothAreLists:
-                keyList = orderNumToKey.get(order_num,[])
-                if not keyList:
-                    orderNumToKey[order_num] = keyList
-                if key not in keyList:
-                    keyList.append(key)
-            else:
-                previousKey = orderNumToKey.get(order_num)
-                if previousKey:
-                    raise Exception('order_num:{1} already maps to previousKey:{1} but we want to map it to new key:{2}'.format(order_num,previousKey,key))
-                orderNumToKey[order_num] = key
-
-            return
-
-        def normalizeCompany(company):
-            if not company:
-                return company
-            chineseChars = re.findall(r'[\u4e00-\u9fff]+', company)
-            if chineseChars:
-                # 2/2/2022 added this for order 9218. company_from_property was good and was 'ZWO CO LTD.'
-                return ''
-            toks = company.strip().split()
-            return ' '.join(toks)
-
-        def upgradeFromOtherIdentifierToCompany(itemsUsedForCompany,itemToOrderNumMap,orderNumToCompanyFromPropertyMap,orderNumToCompanyMap,companyToOrderNumMap):
-            failed_items = []
-            for item in itemsUsedForCompany:
-                order_nums = itemToOrderNumMap.get(item)
-                if not order_nums:
-                    print("Item of '{0}' does not have entry in itemToOrderNumMap. That's bad. Fix the program.".format(item))
-                    failed_items.append(item)
-                    continue
-                companies = []
-                order_nums_with_company = []
-                for order_num in order_nums:
-                    company = orderNumToCompanyFromPropertyMap.get(order_num)
-                    if company:
-                        order_nums_with_company.append(order_num)
-                        companies.append(company)
-                if not companies:
-                    msg = "Item '{0}' has order_nums {1}. They do not have entry in orderNumToCompanyFromPropertyMap. That's bad. Fix program."
-                    print(msg.format(item,order_nums))
-                    failed_items.append(item)
-                    continue
-                if len(companies) > 1:
-                    msg = "Item '{0}' has order_nums {1} but orderNumToCompanyFromPropertyMap[{2}] is {3}. We need 1 value. Fix program."
-                    print(msg.format(item,order_nums,order_num,companies))
-                    failed_items.append(item)
-                    continue
-                for order_num in order_nums:
-                    if orderNumToCompanyMap[order_num] != companies[0]:
-                        print("Upgrading orderNumToCompanyMap[{0}] of '{1}' to '{2}'".format(order_num,orderNumToCompanyMap[order_num],companies[0]))
-                        orderNumToCompanyMap[order_num] = companies[0]
-                        appendToKeyToOrderNumListMap(companyToOrderNumMap,companies[0],order_num)
-
-            return failed_items
-
-
-        def improveCompanyWithCompanyFromProperty(orderNumToCompanyMap,companyToOrderNumMap,orderNumToCompanyFromPropertyMap,companyFromPropertyToOrderNumMap,orderNumToEmailMap):
-            for order_num,company in orderNumToCompanyMap.items():
-                company_from_property = orderNumToCompanyFromPropertyMap.get(order_num)
-                if company == company_from_property or not company_from_property:
-                    continue
-                print("For order_num:{0} replacing company: '{1}' with company_from_property: '{2}'.".format(order_num,company,company_from_property))
-
-                orderNums = companyToOrderNumMap[company]
-                if not orderNums:
-                    # its already been changed. process next item.
-                    continue
-
-                emailToOrderNumMap = {}
-                for o_n in orderNums:
-                    email = orderNumToEmailMap.get(o_n)
-                    o_n_list = emailToOrderNumMap.get(email,[])
-                    if not o_n_list:
-                        emailToOrderNumMap[email] = o_n_list
-                    o_n_list.append(o_n)
-                email = orderNumToEmailMap.get(order_num)
-                orderNums_to_change_company = emailToOrderNumMap.get(email)
-
-                for orderNum_to_change_company in orderNums_to_change_company:
-                    orderNumToCompanyMap[orderNum_to_change_company] = company_from_property
-                    orderNum_previous = companyToOrderNumMap.get(company,[])
-                    if order_num in orderNum_previous:
-                        if len(orderNum_previous) > 1:
-                            # 12/17/2023. example when we had this complex change of company name we printed:
-                            #             Removing order_num:13417 from orders list:[13443, 13442, 13441, 13417] for company 'Celestron' because its moving to 'Sky-Watcher'.
-                            print("Removing order_num:{0} from orders list:{1} for company '{2}' because its moving to '{3}'.".format(order_num,orderNum_previous,company,company_from_property))
-                        orderNum_previous.remove(order_num)
-                        if not orderNum_previous:
-                            del companyToOrderNumMap[company]
-
-                    orderNum_new = companyToOrderNumMap.get(company_from_property,[])
-                    if not orderNum_new:
-                        companyToOrderNumMap[company_from_property] = orderNum_new
-                    orderNum_new.append(orderNum_to_change_company)
-
-            return
-
-        def mergeCompanyEndingWith_of_XXX(orderNumToCompanyMap,companyToOrderNumMap):
-            # 2/10/2022. so far we have only one known example where this fuction is needed.
-            # it merges 'Amateur Astronomers Association' with 'Amateur Astronomers Association of NY'
-
-            targetToUpgradeMap = {}
-            for order_num,company in orderNumToCompanyMap.items():
-                toks = company.split()
-                if len(toks) < 3 or toks[-2].lower() != 'of':
-                    continue
-                targetCompany = ' '.join(toks[:-2])
-                targetToUpgradeMap[targetCompany] = company
-
-            for targetCompany,company in targetToUpgradeMap.items():
-                orderNumsToUpgrade = companyToOrderNumMap.get(targetCompany)
-                if not orderNumsToUpgrade:
-                    continue
-                toks = company.split()
-                suffix = ' '.join(toks[-2:])
-                for orderNumToUpgrade in orderNumsToUpgrade:
-                    print("For order_num:{0} replacing company: '{1}' with '{2}' because we pick up '{3}' suffix.".format(orderNumToUpgrade,targetCompany,company,suffix))
-                    orderNumToCompanyMap[orderNumToUpgrade] = company
-                    appendToKeyToOrderNumListMap(companyToOrderNumMap,company,order_num)
-
-            return
 
         print('\nENTERING  buildOrderNumToCompanyMap {0}'.format(STARS))
 
         self.orderNumToCompanyMap.clear()
-
-        # these are the 9 maps that are used to build the final result of self.orderNumToCompanyMap
-        companyToOrderNumMap = {} # >1 orderNum. 'Andover Corporation', 'Celestron', 'Hutech Corporation', 'Rockland Astronomy Club', 'Software Bisque, Inc.', 'Spaceflux' and others
-        emailToOrderNumMap = {} # >1 orderNum. 'Peter@Bisque.com', 'anita.maier@nimax.de', 'dixie.richards@andovercorp.com', 'kkawai@celestron.com', and others
-        nameToOrderNumMap = {} # >1 orderNum. 'Anita Maier', 'Babak Sedehi', 'Dixie Richards', 'Kevin Kawai', 'Ludovic Nachury', 'Marco Rocchetto', 'Peter Hardy', 'Rori Baldari'
-        companyFromPropertyToOrderNumMap = {}
-        companyFromAttributeToOrderNumMap = {} # >1 orderNum.  'Unistellar', 'NexDome Observatories', 'Andover Corporation', 'Celestron', 'Software Bisque, Inc.', 'Unistellar', 'nimax GmbH'
-        orderNumToCompanyMap = {}
-        orderNumToEmailMap = {}
-        orderNumToNameMap = {}
-        orderNumToCompanyFromPropertyMap = {} # >1 item. 9114, 9143, 9258, 9281, 92849285
-        orderNumToCompanyFromAttributeMap = {}
-
-        # these collections used to keep track of troublesome order_num to company mappings.
-        orderNumsMissingCompanies = []
-        orderNumsMissingCompanies2 = []
-        orderNumsMissingCompanies3 = []
-        emailsUsedForCompany = []
-        namesUsedForCompany = []
-
-        # populate the 9 maps with raw data. the 2 company maps and 2 companyFromProperty maps are adjusted later.
-        i = 0
-        debug = False
-        for order_num,nvt in raw.items():
-            order_num = int(order_num.strip())
-            company = normalizeCompany(nvt.company)
-            company_from_attribute = normalizeCompany(nvt.company_from_attribute)
-            populate2MapsForKeyAndOrderNum(companyFromAttributeToOrderNumMap,orderNumToCompanyFromAttributeMap,normalizeCompany(company_from_attribute),order_num)
-            if not company:
-                orderNumsMissingCompanies.append(order_num)
-            company_from_property = nvt.company_from_property
-            email = nvt.email
-            name = nvt.name
-            if debug:
-                msg = 'i:{0}, order_num:{1}, company:{2}, company_from_property:{3}, company_from_attribute:{4}, email:{5}, name:{6}'
-                print(msg.format(i,order_num,company,company_from_property,company_from_attribute,email,name))
-            populate2MapsForKeyAndOrderNum(companyToOrderNumMap,orderNumToCompanyMap,company,order_num)
-            populate2MapsForKeyAndOrderNum(emailToOrderNumMap,orderNumToEmailMap,email,order_num)
-            populate2MapsForKeyAndOrderNum(nameToOrderNumMap,orderNumToNameMap,name,order_num)
-            for cfp in company_from_property:
-                populate2MapsForKeyAndOrderNum(companyFromPropertyToOrderNumMap,orderNumToCompanyFromPropertyMap,normalizeCompany(cfp),order_num,bothAreLists=True)
-            i += 1
-
-        print('9 basic maps populated.\nThe 4 items to scalar orderNum Maps have these sizes:')
-        msg = 'companyToOrderNumMap:{0}  companyFromPropertyToOrderNumMap:{1}  emailToOrderNumMap:{2}  nameToOrderNumMap:{3}'
-        print(msg.format(len(companyToOrderNumMap),len(companyFromPropertyToOrderNumMap),len(emailToOrderNumMap),len(nameToOrderNumMap)))
-        print('The 5 orderNum to item lists have these sizes:')
-        msg = 'orderNumToCompanyMap:{0}  orderNumToEmailMap:{1}  orderNumToNameMap:{2}  orderNumToCompanyFromPropertyMap:{3}  orderNumToCompanyFromAttributeMap:{4}'
-        print(msg.format(len(orderNumToCompanyMap),len(orderNumToEmailMap),len(orderNumToNameMap),len(orderNumToCompanyFromPropertyMap),len(orderNumToCompanyFromAttributeMap)))
-
-        self.improveCompanyFromPropertyWithOtherItem('email',companyFromPropertyToOrderNumMap,orderNumToCompanyFromPropertyMap,emailToOrderNumMap,companyFromAttributeToOrderNumMap)
-        self.improveCompanyFromPropertyWithOtherItem('name',companyFromPropertyToOrderNumMap,orderNumToCompanyFromPropertyMap,nameToOrderNumMap,companyFromAttributeToOrderNumMap)
-
-        # backfill in orderNumsMissingCompanies with company_from_property if possible. Failing that try backfilling with name, then email
-        for order_num in orderNumsMissingCompanies:
-            companies_from_property = orderNumToCompanyFromPropertyMap.get(order_num)
-            name = orderNumToNameMap.get(order_num)
-            email = orderNumToEmailMap.get(order_num)
-            if companies_from_property:
-                company = companies_from_property[0]
-                if len(companies_from_property) > 1:
-                    print('Company is missing and more than one choice in companies_from_property:{0}. Pick one later.'.format(companies_from_property))
-                    orderNumsMissingCompanies2.append(order_num)
-                else:
-                    orderNumToCompanyMap[order_num] = company
-                    appendToKeyToOrderNumListMap(companyToOrderNumMap,company,order_num)
-            else:
-                if name:
-                    print('Company is missing and companies_from_property is missing for order_num:{0}. use name:{1} from that order_num.'.format(order_num,name))
-                    namesUsedForCompany.append(name)
-                    company = name
-                elif email:
-                    print('Company is missing and companies_from_property is missing and name is missing for order_num:{0}. use email:{1} from that order_num.'.format(order_num,email))
-                    emailsUsedForCompany.append(email)
-                    company = email
-                else:
-                    raise Exception('both name and email missing for order_num:{0}'.format(order_num))
-                orderNumToCompanyMap[order_num] = company
-                appendToKeyToOrderNumListMap(companyToOrderNumMap,company,order_num)
-
-        # improve orderNumToCompanyFromPropertyMap with getBestCompany.
-
-        for order_num,companies in orderNumToCompanyFromPropertyMap.items():
-            if len(companies)== 1:
-                # no choice of best company name needed. there is only one
-                orderNumToCompanyFromPropertyMap[order_num] = companies[0]
-            else:
-                company,comment,error = getBestCompany(companies,companyFromAttributeToOrderNumMap)
-                if error:
-                    self.error += '\n' + comment if self.error else comment
-                if comment:
-                    print(comment)
-                # found best company name
-                orderNumToCompanyFromPropertyMap[order_num] = company
-
-        # supplement orderNumToCompanyMap with orderNumToCompanyFromPropertyMap
-        for order_num in orderNumsMissingCompanies2:
-            company = orderNumToCompanyFromPropertyMap.get(order_num)
-            if company:
-                orderNumToCompanyMap[order_num] = company
-                appendToKeyToOrderNumListMap(companyToOrderNumMap,company,order_num)
-            else:
-                # orderNumsMissingCompanies3 is informational. for now its not used for anything.
-                orderNumsMissingCompanies3.append(order_num)
-
-        failed_names = upgradeFromOtherIdentifierToCompany(namesUsedForCompany,nameToOrderNumMap,orderNumToCompanyFromPropertyMap,orderNumToCompanyMap,companyToOrderNumMap)
-        failed_emails = upgradeFromOtherIdentifierToCompany(emailsUsedForCompany,emailToOrderNumMap,orderNumToCompanyFromPropertyMap,orderNumToCompanyMap,companyToOrderNumMap)
-
-        if failed_names:
-            print("These names of {0} are being used for company. That's bad. Need a real company name. Fix program.".format(failed_names))
-        if failed_emails:
-            print("These emails of {0} are being used for company. That's bad. Need a real company name. Fix program.".format(failed_emails))
-
-        improveCompanyWithCompanyFromProperty(orderNumToCompanyMap,companyToOrderNumMap,orderNumToCompanyFromPropertyMap,companyFromPropertyToOrderNumMap,orderNumToEmailMap)
-        mergeCompanyEndingWith_of_XXX(orderNumToCompanyMap,companyToOrderNumMap)
-
-        # this is the final upgrade to company. if we have a user entered override name in company_from_attribute it takes priority over all other adjustments
-        for order_num,company_from_attribute in orderNumToCompanyFromAttributeMap.items():
-            company = orderNumToCompanyMap[order_num]
-            print("For order_num:{0} replacing company: '{1}' with company_from_attribute: '{2}'".format(order_num,company,company_from_attribute))
-            orderNumToCompanyMap[order_num] = company_from_attribute
-            orderNums = companyToOrderNumMap.get(company)
-            if not orderNums:
-                # 1/30/2023. this happened when I was screwing around trying to enter order #11719 for Rowan Astronomy but using my email. It clobbered my address info and
-                # all customer details under Joe Moskowitz picked up Rowan Astronomy details. I deleted #11719. Lesson is can't build fake order with my email.
-                print("Major screw-up for order_num:{0}, company:'{1}'. companyToOrderNumMap['{1}'] has no entry. FIX THE PROGRAM.".format(order_num,company))
-            else:
-
-                # 3/16/2023. example is order_num 11607 and company_from_attribute 'Sky-Watcher' where companyToOrderNumMap['Celestron'] is [11617, 11607, 9368, 9132]
-                # and should be changed to [11617, 9368, 9132] and companyToOrderNumMap['Sky-Watcher'] is missing and needs [11607]
-                if order_num in orderNums:
-                    orderNums.remove(order_num)
-                orderNums_new = companyToOrderNumMap.get(company_from_attribute,[])
-                if not orderNums_new:
-                    companyToOrderNumMap[company_from_attribute] = orderNums_new
-                orderNums_new.append(order_num)
-
-                # 3/16/2023. same example as above where orderNumToCompanyMap[11607] was 'Celestron' and is changed to 'Sky-Watcher'
-                orderNumToCompanyMap[order_num] = company_from_attribute
-
-        self.companySanityCheck(orderNumToCompanyMap,emailToOrderNumMap,nameToOrderNumMap)
-
+        orderNumToCompanyMap,self.error = buildOrderNumToCompanyMap(raw)
+        if self.error:
+            print(f'Error from NEAFVendor.buildOrderNumToCompanyMap:\n{self.error}\n')
         # we're done
         self.orderNumToCompanyMap.update(orderNumToCompanyMap)
 
         print('EXITING buildOrderNumToCompanyMap {0}\n'.format(STARS))
         return
-
-    # END OF COMPANY NAME MANAGEMENT FUNCTIONS ***************************************************************************************
-
-    def repairExploreScientific(self,es):
-        return es
 
     def get_nv_collections(self):
 
@@ -922,19 +438,10 @@ class NEAFVendor(AccessShopify):
         self.buildOrderNumToCompanyMap(self.raw)
         # build_neaf_vendor_full_dict_from_shopify build full from raw.
         full = self.build_neaf_vendor_full_dict_from_shopify(self.raw)
+        self.populateTotalAdjBoothQty(full)
 
         self.print_and_save('converted raw data dict of size {0} to full data dict of size {1}'.format(len(self.raw),len(full)))
         neaf_ss = self.build_neaf_vendor_processed_dict_from_full(full)
-
-        # TODO 2/17/2024. remove this hack to fix Explore Scientific results when actual fix for processing refunds is fixed.
-        #                 problem mysteriously went away in s/s even though invoice looked odd.
-        EKEY = 'Explore Scientific'
-        EKEY2 = 'Explore Scientific LLC'
-        ekey_dict = neaf_ss.get(EKEY)
-        ekey2_dict = neaf_ss.get(EKEY2)
-        if ekey_dict or ekey2_dict:
-            ekey = EKEY if ekey_dict else EKEY2
-            neaf_ss[ekey] = self.repairExploreScientific(ekey_dict or ekey2_dict)
 
         vendor_invoices,vendor_last_order_date_map = self.build_invoices(full)
         company_badge = buildCompanyBadgeList(full)
@@ -944,14 +451,14 @@ class NEAFVendor(AccessShopify):
         return
 
     def buildFromPriorShopifyLoad(self):
-        # 12/30/2022. buildFromPriorShopifyLoad assumes self.rawOrdersTupList is already built by shopifyOrdersFromHttps. buildFromPriorShopifyLoad builds self.nv_collections like this:
+        # 12/30/2022. buildFromPriorShopifyLoad assumes self.rawOrdersTupList is already built by shopifyOrdersFromGraphQL. buildFromPriorShopifyLoad builds self.nv_collections like this:
         #             self.rawOrdersTupList -> self.raw -> self.nv_collections
 
         if self.error:
             self.error = 'Cannot run NEAFVendor.buildFromPriorShopifyLoad(). NEAFVendor has pre-existing error:\n{0}'.format(self.error)
             return
 
-        # 12/30/2022. this function populates self.raw from self.rawOrdersTupList which was built in shopifyOrdersFromHttps.
+        # 12/30/2022. this function populates self.raw from self.rawOrdersTupList which was built in shopifyOrdersFromGraphQL.
         self.convertShopifyOrdersToRacOrders()
 
         self.orderNumToCompanyMap = {}
@@ -967,15 +474,13 @@ class NEAFVendor(AccessShopify):
         if self.error:
             self.error = 'Cannot run NEAFVendor.shopifyLoad(). NEAFVendor has pre-existing error:\n{0}'.format(self.error)
             return
-        if USE_GRAPHQL[0]:
-            self.shopifyOrdersFromGraphQL()
-        else:
-            self.shopifyOrdersFromHttps()
+        self.shopifyOrdersFromGraphQL()
+
         if self.error:
             self.error = 'Failure in NEAFVendor.shopifyLoad().\n{0}'.format(self.error)
             return
 
-        # 12/30/2022. buildFromPriorShopifyLoad assumes self.rawOrdersTupList is already built by shopifyOrdersFromHttps or shopifyOrdersFromGraphQL.
+        # 12/30/2022. buildFromPriorShopifyLoad assumes self.rawOrdersTupList is already built by shopifyOrdersFromGraphQL.
         #             buildFromPriorShopifyLoad builds self.nv_collections like this:
         #             self.rawOrdersTupList -> self.raw -> self.nv_collections
         self.buildFromPriorShopifyLoad()
@@ -1020,7 +525,7 @@ class NEAFVendor(AccessShopify):
         return self.target_company,target_company_invoice
 
     def output_nvt_csv(self,nv_src_item):
-        if nv_src_item == NEAF_MANAGMENT:
+        if nv_src_item == NEAF_VENDOR:
             nvt_dict = self.nv_collections.neaf_ss
         elif nv_src_item == NEAF_FULL:
             nvt_dict = self.nv_collections.full
@@ -1034,21 +539,20 @@ class NEAFVendor(AccessShopify):
         now_str = now.strftime('%Y-%m-%d_%H-%M-%S')
         fname = os.path.join(tdir,'neaf_output','{0}_{1}.csv'.format(nv_src_item,now_str))
 
-        if not os.path.exists(os.path.dirname(fname)):
-            os.makedirs(os.path.dirname(fname))
+        os.makedirs(os.path.dirname(fname),exist_ok=True)
 
         company_name_fields = ['company','name']
-        header = NeafSSTup._fields if nv_src_item == NEAF_MANAGMENT else (company_name_fields if nv_src_item == NEAF_COMPANY_BADGE else NeafVendorTup._fields)
+        header = NeafSSTup._fields if nv_src_item == NEAF_VENDOR else (company_name_fields if nv_src_item == NEAF_COMPANY_BADGE else NeafVendorTup._fields)
         new_header = []
         for hd in header:
             hd = hd.replace('_','\n')
             new_header.append(hd)
-        with open(fname,'w') as nvt_csv_file:
+        with open(fname,'w',encoding="utf-8-sig") as nvt_csv_file:
             wr = csv.writer(nvt_csv_file, quoting=csv.QUOTE_ALL,lineterminator='\n')
             wr.writerow(new_header)
             for key,nvt in nvt_dict.items():
                 writerow_UnicodeEncodeError(wr,list(nvt))
-        msg = 'nvt csv written to '+fname+'\n'
+        msg = f'NEAF vendor management csv file with {len(nvt_dict.items())} items written to {fname}\n'
         return msg
 
     def show_neaf_vendor_dicts(self):
@@ -1065,7 +569,7 @@ class NEAFVendor(AccessShopify):
         for company,invoice in self.nv_collections.vendor_invoices.items():
             cnt += 1
 
-            save_message_one,subdir_path,fname = save_invoice(company,invoice,as_pdf)
+            save_message_one,subdir_path,fname = save_invoice(company,invoice,as_pdf,subdir='all_invoices')
             msg = "{0:3d}: {1}".format(cnt,save_message_one)
             print(msg)
             all_invoices_to_print += msg + '\n'
@@ -1080,8 +584,7 @@ class NEAFVendor(AccessShopify):
         now_str = now.strftime('%Y-%m-%d_%H-%M-%S')
         fname = os.path.join(tdir,'neaf_output','neaf_vendor_sign_in_{0}.csv'.format(now_str))
 
-        if not os.path.exists(os.path.dirname(fname)):
-            os.makedirs(os.path.dirname(fname))
+        os.makedirs(os.path.dirname(fname),exist_ok=True)
 
         # build alphabetic list of company names
         key_to_company_map = {}
@@ -1091,7 +594,7 @@ class NEAFVendor(AccessShopify):
 
         header = ('Name of\nCompany','Booth\nLocation','Arrival\nTime','Electricity','Wifi','# of Badges\nEntitled',
             '# of Badges\nRequested','# of Badges\nin Envelope','Shipping Requested','Shipping In','Shipping Out','Door Prize')
-        with open(fname,'w') as nvsi_csv_file:
+        with open(fname,'w',encoding="utf-8-sig") as nvsi_csv_file:
             wr = csv.writer(nvsi_csv_file, quoting=csv.QUOTE_ALL, lineterminator='\n')
             wr.writerow(header)
             for key in sorted(key_to_company_map.keys()):
@@ -1325,6 +828,8 @@ class NEAFVendor(AccessShopify):
         # 12/19/2022. critical function that edits order_note_attributes under a company and persists those edits under an order.
         # must work well with mergeOrderNoteAttributes that builds merged order_note_attributes in self.nv_collections.full from order_note_attributes in self.nv_collections.raw.
 
+        # 4/9/2026. TODO enhance applyOrderNoteAttributeEdit to skip full reload and have it rebuild NEAFVendor collections.
+
         if not self.target_company:
             msg = 'No target company has been chosen. Cannot use this function until company chosen.'
             return msg
@@ -1476,7 +981,7 @@ class NEAFVendor(AccessShopify):
     def show_hints(self,spt):
         neaf_year_str = 'NEAF year being processed: {0}'.format(self.neaf_year) if self.neaf_year else \
             'Processing all NEAF invoices from {0} to {1}'.format(self.created_at_min,self.created_at_max)
-        # 2/1/2020. drop any email errors since thuis isn't a feature currently in use
+        # 2/1/2020. drop any email errors since this isn't a feature currently in use
         #err_str = 'email credentials error:\n    '+spt.error if spt.error else ''
         delim = '\n+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n'
         err_str = '\n' + delim + self.error + delim + '\n' if self.error else ''

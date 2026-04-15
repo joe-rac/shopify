@@ -3,20 +3,19 @@ import os
 import datetime
 import random
 import tracemalloc
-from consts import NEAF_DATES,DOOR_PRIZE,USE_GRAPHQL,NEAF_ATTEND_DOOR_PRIZE
-from utils import RAC_DIR,build_door_prize_cc_dict,get_weekend_day,DEFAULT_DAY,DICT_DELIMITER_FRONT,delta_on_date_str
+from consts import NEAF_DATES,DOOR_PRIZE,DEFAULT_DAY,SATURDAY,SUNDAY,NEAF_YEAR_DEFAULT,MISSING
+from utils import RAC_DIR,build_door_prize_cc_dict,DICT_DELIMITER_FRONT
 from utils import show_dict,read_door_prize_file,DOOR_PRIZE_HEADER,write_door_prize_file,DoorPrizeSrcDicts,DoorPrizeResDicts
-from utils import show_paths_and_files_dp,DOOR_PRIZE_WINNER,get_default_neaf_year,DoorPrizeTup,ERROR,SATURDAY,SUNDAY
-from orders import Orders
+from utils import show_paths_and_files_dp,DOOR_PRIZE_WINNER,DoorPrizeTup,ERROR
+from date_filter_utils import calc_date_items_from_neaf_year_and_day
 from graphql_utils import get_url_and_headers
 from pdf_utils import build_winners_pdf
 from constant_contact import get_cc_door_prize_list
-from access_shopify import AccessShopify,NEAF_YEAR_DEFAULT
+from access_shopify import AccessShopify
 
 def get_random_in_range(max_num):
     winner = random.randint(0, max_num - 1)
     return winner
-
 
 class DoorPrize(AccessShopify):
 
@@ -32,7 +31,7 @@ class DoorPrize(AccessShopify):
             dpt_dict[key] = dpt
         return
 
-    def __init__(self,neaf_year=NEAF_YEAR_DEFAULT,sku_key=DOOR_PRIZE,override_day=DEFAULT_DAY,order_to_debug=None,verbose=False):
+    def __init__(self,neaf_year=NEAF_YEAR_DEFAULT,override_day=DEFAULT_DAY,order_to_debug=None,verbose=False):
 
         created_at_min = None
         created_at_max = None
@@ -44,25 +43,16 @@ class DoorPrize(AccessShopify):
         super(DoorPrize, self).__init__(neaf_year,created_at_min,created_at_max,order_to_debug,verbose)
         if self.error:
             return
-        if not self.neaf_year:
-            # even if created_at_min,created_at_max are set we still need neaf_year to lookup actual days of neaf.
-            self.neaf_year = int(self.created_at_min[0:4]) + 1
 
-        # sku_key can also be MERCH. example is in search_and_mark
-        self.sku_key = sku_key
+        self.sku_key = DOOR_PRIZE
         # 12/30/2022. this function populates self.raw from self.rawOrdersTupList which was built in shopifyOrdersFromHttps.
 
-        self.dpSrc = None
-        self.dpRes = None
+        self.dpSrc = DoorPrizeSrcDicts({}, {}, {}, {})
+        self.dpRes = DoorPrizeResDicts({}, {})
         self.prev_load_time = None
         self.fname = None
-        self.weekend_day = get_weekend_day(override_day)
-        if self.weekend_day == ERROR:
-            self.error = 'override_day:{0} is invalid. Must be set to Saturday or Sunday if weekday.'.format(override_day)
 
-        # I found 37 entries in CC list named NEAF_Door_Prize_Registration from 3/2/2023. they shouldn't be there since only way names should get in that list is on NEAF show days
-        # when attendees register. I asked Mies if he knows how names got in there and he said "I have no idea". I'll just ignore that day.
-        self.cc_dates_to_ignore = ['2023-03-02','2023-03-11','2023-03-12']
+        self.created_at_max,self.neaf_day_of_week,self.neaf_other_day_of_week,self.error = calc_date_items_from_neaf_year_and_day(self.neaf_year,override_day)
 
         return
 
@@ -73,11 +63,12 @@ class DoorPrize(AccessShopify):
             if door_prize_winner_dict.get(k):
                 continue
             door_prize_eligible_dict[k] = v
-        other_day = SUNDAY if self.weekend_day == SATURDAY else SATURDAY
+        other_dow = self.neaf_other_day_of_week.lower()
         for k, v in door_prize_dict.items():
-            if door_prize_winner_dict.get(k) or other_day.lower() in v.sku.lower():
-                if other_day.lower() in v.sku.lower():
-                    door_prize_reject_dict[k] = v
+            if door_prize_winner_dict.get(k) or other_dow in v.sku.lower() or MISSING in v.name:
+                # 3/5/2026. example satisfying 'MISSING in v.name' clause is #16499 for NEAF year:2025, NEAF day of week:Saturday.
+                #           v.name is 'MISSING MISSING' because user paid by Tap & Chip on Saturday but no personal info available.
+                door_prize_reject_dict[k] = v
                 continue
             door_prize_eligible_dict[k] = v
         return door_prize_eligible_dict, door_prize_reject_dict
@@ -94,38 +85,43 @@ class DoorPrize(AccessShopify):
             if minutes < 15.0:
                 # if last load was less than 15 minutes ago skip load and use last results.
                 plt = self.prev_load_time.strftime('%H:%M:%S')
-                self.msg = 'Inside constantContactAndShopifyLoad(...) skipping re-load of data because last load was less than 15 minutes ago. It was {0:.1f} minutes ago at {2}.'
+                self.msg = 'Inside constantContactAndShopifyLoad(...) skipping re-load of data because last load was less than 15 minutes ago. It was {0:.1f} minutes ago at {1}.'
                 self.msg = self.msg.format(minutes, plt)
                 print(self.msg)
                 return
 
         if self.error:
-            self.error = 'Cannot run DoorPrize.shopifyLoad(). DoorPrize has pre-existing error:\n{0}'.format(self.error)
+            self.error = 'Cannot run DoorPrize.constantContactAndShopifyLoad(). DoorPrize has pre-existing error:\n{0}'.format(self.error)
             return
         # 12/30/2022. shopifyOrdersFromHttps populates self.rawOrdersTupList with raw shopify data from their webservice.
-        if USE_GRAPHQL[0]:
-            self.shopifyOrdersFromGraphQL()
-        else:
-            self.shopifyOrdersFromHttps()
+        self.shopifyOrdersFromGraphQL()
         if self.error:
-            self.error = 'Failure in DoorPrize.shopifyLoad().\n{0})'.format(self.error)
+            self.error = 'Failure in DoorPrize.constantContactAndShopifyLoad().\n{0})'.format(self.error)
             return
 
         # 12/30/2022. convertShopifyOrdersToRacOrders populates self.raw from self.rawOrdersTupList which was built in shopifyOrdersFromHttps.
         self.convertShopifyOrdersToRacOrders()
 
-        door_prize_winner_dict, self.fname = read_door_prize_file(DOOR_PRIZE_WINNER, self.verbose)
+        door_prize_winner_dict, self.fname = read_door_prize_file(DOOR_PRIZE_WINNER, self.neaf_year, self.neaf_day_of_week, self.verbose)
         door_prize_dict = self.raw
 
-        ndt = NEAF_DATES[self.neaf_year]
-        # As convenience when debugging start looking in Constant Contact 10 weeks before NEAF. this way I can test this app shortly before NEAF starts.
-        start_date = delta_on_date_str(ndt.neaf_start, -70)
-        ccdpt_list = get_cc_door_prize_list(start_date, ndt.neaf_end, verbose=self.verbose)
-        door_prize_cc_dict, door_prize_cc_reject_dict, cc_dates_to_ignore_cnt = build_door_prize_cc_dict(ccdpt_list, self.raw, self.weekend_day, self.cc_dates_to_ignore, self.verbose)
+        # 3/9/2026: XXX IMPORTANT:
+        #               Time/day filtering for Constant Contact entries happens only in get_cc_door_prize_list().
+        #               Do not duplicate that filtering in build_door_prize_cc_dict() or anywhere else.
+        ccdpt_list,msg = get_cc_door_prize_list(self.neaf_year,self.neaf_day_of_week, verbose=self.verbose)
+
+        door_prize_cc_dict, door_prize_cc_reject_dict = build_door_prize_cc_dict(ccdpt_list, self.raw, self.verbose)
 
         door_prize_eligible_dict, door_prize_reject_dict = self.build_eligible_door_prize_dict(door_prize_winner_dict,door_prize_cc_dict,door_prize_dict)
-        self.dpSrc = DoorPrizeSrcDicts(door_prize_winner_dict, door_prize_cc_dict, door_prize_cc_reject_dict, cc_dates_to_ignore_cnt, door_prize_dict)
-        self.dpRes = DoorPrizeResDicts(door_prize_eligible_dict, door_prize_reject_dict)
+
+        for trg,src in ((self.dpSrc.winner,door_prize_winner_dict),(self.dpSrc.cc,door_prize_cc_dict),(self.dpSrc.cc_reject,door_prize_cc_reject_dict),(self.dpSrc.shopify,door_prize_dict)):
+            trg.clear()
+            trg.update(src)
+
+        for trg,src in ((self.dpRes.eligible, door_prize_eligible_dict),(self.dpRes.reject, door_prize_reject_dict)):
+            trg.clear()
+            trg.update(src)
+
         self.prev_load_time = datetime.datetime.now()
 
         print('memory usage at exit from DoorPrize.constantContactAndShopifyLoad after all loading is done : {0}'.format(tracemalloc.get_traced_memory()))
@@ -142,7 +138,6 @@ class DoorPrize(AccessShopify):
         msg = '-----------------------------------------------------\n'
         msg += 'DoorPrize.dpSrc.cc size:{0}\n'.format(len(self.dpSrc.cc))
         msg += 'DoorPrize.dpSrc.cc_reject size:{0}\n'.format(len(self.dpSrc.cc_reject))
-        msg += 'DoorPrize.dpSrc.cc_dates_to_ignore_cnt:{0}\n'.format(self.dpSrc.cc_dates_to_ignore_cnt)
         msg += 'DoorPrize.dpSrc.shopify size:{0}\n'.format(len(self.dpSrc.shopify))
         msg += 'DoorPrize.dpRes.reject size:{0}\n'.format(len(self.dpRes.reject))
         msg += 'DoorPrize.dpRes.eligible size:{0}\n'.format(len(self.dpRes.eligible))
@@ -170,7 +165,7 @@ class DoorPrize(AccessShopify):
         1) All NEAF and NEAIC purchases online from Shopify can be acquired by
            webservice call to Shopify using {0}
         2) All Door Prize entries in Constant Contact.       Acquired from Constant Contact api.
-        3) Prior winners in file door_prize_winner.csv and are excluded from future drawings.
+        3) Prior winners in file {1}.csv and are excluded from future drawings.
 
         Exclude any entries in item 2) with email addresses that match item 1).
 
@@ -179,19 +174,21 @@ class DoorPrize(AccessShopify):
         door_prize_reject_dict consists of Shopify entrants that do not belong in the days door prize drawing.
         For example if you have Shopify sku of neaf_attend_admit_saturday and its Sunday you will be in reject dict.
         
-        created_at_max:{1}, created_at_min:{2}, neaf_year:{3}, neaf_year_raw:{4}, weekend_day:{5}
-        # CC eligible entries:{6}   # CC entries rejected because wrong weekend day:{7}   CC Dates To Ignore:{8}   # of CC entries on Dates to Ignore:{9}
-        # eligible Shopify and CC entries:{10}   # CC and Shopify entries rejected because wrong weekend day:{11}   
-        # Door Prize Winners:{12}
+        created_at_max:{2}, created_at_min:{3}, neaf_year:{4}, neaf_year_raw:{5}, neaf_day_of_week:{6}
+        # CC eligible entries:             {7:4}    # CC entries rejected:            {8:4} 
+        # eligible Shopify and CC entries: {9:4}    # CC and Shopify entries rejected:{10:4}   
+        # Door Prize Winners:              {11:4}
 
     ---------------------------------------------------------------------------------------------------------------------    
         '''
 
-        webservice_name = get_url_and_headers()[0] if USE_GRAPHQL[0] else 'https://rockland-astronomy-club.myshopify.com/admin/orders.json'
-        hints += '\n' + show_paths_and_files_dp()
-        hints = hints.format(webservice_name,self.created_at_max, self.created_at_min, self.neaf_year, self.neaf_year_raw, self.weekend_day,
-                             len(self.dpSrc.cc), len(self.dpSrc.cc_reject), self.cc_dates_to_ignore, self.dpSrc.cc_dates_to_ignore_cnt,
-                             len(self.dpRes.eligible),len(self.dpRes.reject),len(self.dpSrc.winner))
+        webservice_name = get_url_and_headers()[0]
+        hints += '\n' + show_paths_and_files_dp(self.neaf_year,self.neaf_day_of_week)
+        hints = hints.format(webservice_name,  DOOR_PRIZE_WINNER.format(neaf_year=self.neaf_year, neaf_day_of_week=self.neaf_day_of_week),
+                             self.created_at_max, self.created_at_min, self.neaf_year, self.neaf_year_raw, self.neaf_day_of_week,
+                             len(self.dpSrc.cc), len(self.dpSrc.cc_reject),
+                             len(self.dpRes.eligible),len(self.dpRes.reject),
+                             len(self.dpSrc.winner))
 
         return hints
 
@@ -220,7 +217,7 @@ class DoorPrize(AccessShopify):
         max_num = len(self.dpRes.eligible)
         winner = get_random_in_range(max_num)
         if winner < 0 or winner >= len(self.dpRes.eligible):
-            msg = 'Failure in get_random_index(...) . get_random_in_range(max_num-1={1}) returned {0} but door_prize_eligible_dict has size of {2}. Fix this bug.'
+            msg = 'Failure in get_random_index(...) . get_random_in_range(max_num-1={1}) returned {0} but door_prize_eligible_dict has size of {1}. Fix this bug.'
             input(msg.format(max_num, len(self.dpRes.eligible)))
             raise Exception
         return winner
@@ -258,7 +255,7 @@ class DoorPrize(AccessShopify):
 
     def adjustEligibleForWinner(self,order_num):
         self.append_to_door_price_winner_dict(self.dpSrc.winner, order_num, self.dpSrc.cc, self.dpSrc.shopify)
-        write_door_prize_file(self.dpSrc.winner, DOOR_PRIZE_WINNER)
+        write_door_prize_file(self.dpSrc.winner, DOOR_PRIZE_WINNER, self.neaf_year, self.neaf_day_of_week)
         door_prize_eligible_dict, door_prize_reject_dict = self.build_eligible_door_prize_dict(self.dpSrc.winner, self.dpSrc.cc, self.dpSrc.shopify)
         return door_prize_eligible_dict, door_prize_reject_dict
 
@@ -270,7 +267,10 @@ class DoorPrize(AccessShopify):
         wtime = datetime.datetime.now().strftime('%H:%M:%S')
         msg = msg.format(wtime, winner, len(self.dpRes.eligible), dpt.name, order_num, dpt.sku, dpt.created_at)
         door_prize_eligible_dict, door_prize_reject_dict = self.adjustEligibleForWinner(order_num)
-        self.dpRes._replace(eligible=door_prize_eligible_dict,reject=door_prize_reject_dict)
+        self.dpRes.eligible.clear()
+        self.dpRes.eligible.update(door_prize_eligible_dict)
+        self.dpRes.reject.clear()
+        self.dpRes.reject.update(door_prize_reject_dict)
         return msg
 
     def show_random_index(self):
@@ -309,7 +309,7 @@ def choose_day(override_day):
 
 def main():
 
-    def valid_dp(dp,label):
+    def valid_dp(label,dp):
         if not dp:
             print("Cannot run '{0}' option. First run '0:CC and Shopify Load' and build DoorPrize object.".format(label))
             return False
@@ -349,7 +349,7 @@ def main():
             print(msg)
             continue    
         if option == 8:
-            msg = show_paths_and_files_dp()
+            msg = show_paths_and_files_dp(dp.neaf_year, dp.neaf_day_of_week)
             print(msg)
             continue
         if option == 9:
@@ -375,7 +375,7 @@ def main():
         if option == 0:
 
             dp = DoorPrize(override_day=override_day,verbose=verbose)
-            dp.shopifyAndConstantContactLoad()
+            dp.constantContactAndShopifyLoad()
             if dp.error:
                 print(dp.error)
 
@@ -387,7 +387,7 @@ def main():
         if option == 2:
             if not valid_dp('2:build winners pdf',dp):
                 continue
-            print(build_winners_pdf(dp.dpSrc.winner))
+            print(build_winners_pdf(dp.dpSrc.winner,dp.neaf_year,dp.neaf_day_of_week))
             continue
         if option == 1:
             if not valid_dp('1:pick_winner',dp):
@@ -400,8 +400,7 @@ def main():
 # comment out next call to main before copying to RAC_share. uncomment only for testing.
 #main()
 
-def tutorial_door_prize(override_day=SATURDAY,use_graphql=True,verbose=True):
-    USE_GRAPHQL[0] = use_graphql
+def tutorial_door_prize(override_day=SATURDAY,verbose=True):
     dp = DoorPrize(override_day=override_day,verbose=verbose)
     if dp.error:
         print('after DoorPrize(override_day=override_day, verbose=verbose):\ndp.error:\n{0}dp.msg:\n{1}'.format(dp.error,dp.msg))

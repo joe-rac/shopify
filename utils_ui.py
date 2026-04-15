@@ -1,6 +1,5 @@
-from tkinter import Frame,Label,Button,OptionMenu,StringVar,IntVar,Checkbutton,Entry,WORD,END
+from tkinter import Frame,Label,Button,OptionMenu,StringVar,IntVar,Checkbutton,Entry,WORD,END,Text,Scrollbar
 import tkinter.font
-from tkinter.scrolledtext import ScrolledText
 
 class STButton(object):
     def __init__(self,master,text,command,same_row=False):
@@ -97,14 +96,46 @@ class STWidget(Frame):
         self.entry.delete(0,'end')
         
 class STLargeResult(Frame): 
-    def __init__(self,master,height=1,width=190): 
-        Frame.__init__(self,master)
+
+    def __init__(self, master, height=1, width=190):
+        Frame.__init__(self, master)
+
         small_font = tkinter.font.Font(family="Courier", size=8)
-        self.result = ScrolledText(self,height=height,width=width,wrap=WORD,font=small_font)
-        self.result.grid(row=1,column=0) 
-        self.grid(row=master.next_row) 
-        master.next_row += 1             
-        return 
+
+        # Create scrollbars
+        yscroll = Scrollbar(self, orient="vertical")
+        xscroll = Scrollbar(self, orient="horizontal")
+
+        # Plain Text widget (NOT ScrolledText) so we can have both scrollbars
+        self.result = Text(
+            self,
+            height=height,
+            width=width,
+            wrap="none",                 # <-- critical: enables horizontal scrolling
+            font=small_font,
+            yscrollcommand=yscroll.set,
+            xscrollcommand=xscroll.set,
+        )
+
+        # Wire scrollbars to Text widget
+        yscroll.config(command=self.result.yview)
+        xscroll.config(command=self.result.xview)
+
+        # Layout inside this Frame
+        self.result.grid(row=0, column=0, sticky="nsew")
+        yscroll.grid(row=0, column=1, sticky="ns")
+        xscroll.grid(row=1, column=0, sticky="ew")
+
+        # Make the text area expand with the frame
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+
+        # Preserve your "next_row" placement convention
+        self.grid(row=master.next_row, column=0, sticky="nsew")
+        master.next_row += 1
+        return
+
+
     def set(self,val):
         if val:
             val += '\n'

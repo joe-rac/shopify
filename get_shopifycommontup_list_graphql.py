@@ -1,9 +1,8 @@
 import pprint
 from consts import SKUS_TO_LOAD_DICT,ALL,MEMBERSHIP,REFUND,ShopifyCommonTup,MISSING,FAILED_REFUND
-from utils import remove_unicode,getItem,normalize_phone_num,convert_utc_to_local_datetime
+from utils import remove_unicode,getItem,normalize_phone_num,convert_utc_to_local_datetime,CUSTOM_ATTRIBUTES_KEY
 from get_shopifycommon_tup_list_utils import skipExcludedCovidSkuOrders,show_ShopifyCommonTup_list,refund_desc,get_ShopifyCommonTup_highest_price,convert_ShopifyCommonTup_to_refund
 from get_shopifycommon_tup_list_utils import _buildRefundNote,refunds_list_desc,get_line_item_TOTAL_to_sku_quantity_map,_buildRefundLineItemsDesc
-from order_events import get_phone_or_email_from_order_event_timeline
 
 def get_line_item(line_items,sku):
     for li in line_items:
@@ -13,31 +12,35 @@ def get_line_item(line_items,sku):
     return
 
 def get_refund_line_items_dollarsRefunded_and_desc(refund_line_items,line_items):
-    refund_line_items_dollarsRefunded = 0
+    refund_line_items_refunded_presentment = 0
+    priceSet_shop = None
+    priceSet_presentment = None
     refund_line_items_desc = ''
     for rli in refund_line_items:
         li = rli['lineItem']
         quantity = rli.get('quantity')
         line_item = get_line_item(line_items, li.get('sku'))
-        price = round(float(li['originalUnitPrice']))
-        refund_line_items_dollarsRefunded += quantity * price
+        price_presentment = round(float(li['originalUnitPriceSet']['presentmentMoney']['amount']))
+        refund_line_items_refunded_presentment += quantity * price_presentment
+        priceSet_shop = round(float(rli['priceSet']['shopMoney']['amount']))
+        priceSet_presentment = round(float(rli['priceSet']['presentmentMoney']['amount']))
         refund_line_items_desc = _buildRefundLineItemsDesc(refund_line_items_desc, rli, line_item=line_item)
-    return refund_line_items_dollarsRefunded,refund_line_items_desc
+    return refund_line_items_refunded_presentment,priceSet_shop,priceSet_presentment,refund_line_items_desc
 
 def build_skus_refunded_graphql(order_num,refunds_list,line_items,note,debug):
 
     # 2/14/2025. the refunds inside each refunds_list element fall into 5 categories.
 
-    # 1) each refund_line_items refunds an entire line item. totalRefundedSet is negative number for dollars refunded.
-    #    #8948, #9481(refund_line_items[0] and refund_line_items[1]), #9541, #9404, #13695, #13712, #13415, #7618
+    # 1) each refund_line_items refunds an entire line item. totalRefundedSet_shop is negative number for dollars refunded.
+    #    #8948, #9481(refund_line_items[0] and refund_line_items[1]), #9541, #9404, #13695, #13712, #13415, #7618, #17367(GBP)
 
-    # 2) refund_line_items exist but totalRefundedSet is 0. There was some failure when trying to grant refund.
+    # 2) refund_line_items exist but totalRefundedSet_shop is 0. There was some failure when trying to grant refund.
     #    #9255, #9481(refund_line_items[2])
 
     # 3) dollars of refund in order_adjustments exactly equal and opposite to 1 line item. no refund_line_items. refund that line item.
     #    #10638, #9239, #11709
 
-    # 4) dollars of refund in totalRefundedSet does not match any line item but is <= dollars of entire order. no refund_line_items. refund dollars to order, don't refund a specific sku.
+    # 4) dollars of refund in totalRefundedSet_shop does not match any line item but is <= dollars of entire order. no refund_line_items. refund dollars to order, don't refund a specific sku.
     #    #15317
 
     # 5) failure to categorize. this is a bug and needs repair. No sample orders so far for this use case.
@@ -58,6 +61,7 @@ def build_skus_refunded_graphql(order_num,refunds_list,line_items,note,debug):
     # Don Spong. #9541. refund of NEAF Virtual Experience ticket.
     # Nimax. #9404. refunded $402, full order refunded. intent was standard booth, not premium.
     # QHYCCD. #7618. full refund.
+    # Remote Observatory. #17367. purchase of premium booth for GBP 546 which was converted to $732. when refund of GBP 546 converted $741. special treatment needed for FX.
 
     # 2/6/2025. unfortunately semantics of the skus_refunded dict takes 2 forms. typically for cases 1) to 3) the key is sku getting refund and value is the quantity of the given sku being refunded.
     #           for case 4) the key is REFUND and the value is dollars refunded to entire order because refund can't be ascribed to a single sku.
@@ -88,31 +92,34 @@ def build_skus_refunded_graphql(order_num,refunds_list,line_items,note,debug):
             refund_note = _buildRefundNote(refund_note,'For order_num:{0} found invalid element refunds_list[{1}]:{2} for len(refunds_list):{3}'.format(order_num,r_ind,refunds,len(refunds_list)))
             continue
 
-        # 2/3/2025. the 2 major data structures for describing refunds are set here: refund_line_items or totalRefundedSet.
+        # 2/3/2025. the 2 major data structures for describing refunds are set here: refund_line_items or totalRefundedSet_shop.
         refund_line_items = refunds.get('refundLineItems')
         # TODO 2/11/2025. the half assed negative sign is for backward compatibility with rester which had -306 for #15137. In future consider retaining original sign.
-        totalRefundedSet = -round(float(refunds['totalRefundedSet']['shopMoney']['amount']))
+        totalRefundedSet_shop = -round(float(refunds['totalRefundedSet']['shopMoney']['amount']))
+        totalRefundedSet_currency_shop = refunds['totalRefundedSet']['shopMoney']['currencyCode']
+        totalRefundedSet_presentment = -round(float(refunds['totalRefundedSet']['presentmentMoney']['amount']))
+        totalRefundedSet_currency_presentment = refunds['totalRefundedSet']['presentmentMoney']['currencyCode']
 
-        refund_line_items_dollarsRefunded,refund_line_items_desc = get_refund_line_items_dollarsRefunded_and_desc(refund_line_items, line_items)
+        refund_line_items_refunded_presentment,priceSet_shop,priceSet_presentment,refund_line_items_desc = get_refund_line_items_dollarsRefunded_and_desc(refund_line_items, line_items)
         if not refund_note:
             # 2/7/2025. typically I have the presense of mind to enter note when granting refund but I didn't do that for #13712 so do this.
             refund_note = refund_line_items_desc
 
-        if refund_line_items_dollarsRefunded and not totalRefundedSet:
+        if refund_line_items_refunded_presentment and not totalRefundedSet_presentment:
 
             # 2/5/2025. this block for sub-category 2). These refunds were not delivered to customer and shopify represents these failures poorly.
 
             refund_note = _buildRefundNote(refund_note,'WARNING: REFUNDS OF {0} NOT CORRECTLY DISPLAYED.'.format(refund_line_items_desc))
 
-        elif refund_line_items_dollarsRefunded == -totalRefundedSet:
+        elif refund_line_items_refunded_presentment == -totalRefundedSet_presentment:
 
             # 2/5/2025. this block for sub-category 1) for processing of normal refunds.
 
             for rli in refund_line_items:
                 skus_refunded[rli['lineItem']['sku']] = rli['quantity']
 
-        elif not refund_line_items and totalRefundedSet < 0:
-            sku_quantity_toks = line_item_TOTAL_to_sku_quantity_map.get(-totalRefundedSet)
+        elif not refund_line_items and totalRefundedSet_presentment < 0:
+            sku_quantity_toks = line_item_TOTAL_to_sku_quantity_map.get(-totalRefundedSet_presentment)
             sku_quantities = sku_quantity_toks.split('|') if sku_quantity_toks else []
 
             if len(sku_quantities) == 1:
@@ -130,12 +137,14 @@ def build_skus_refunded_graphql(order_num,refunds_list,line_items,note,debug):
             else:
 
                 # 2/5/2025. this block for sub-category 4). assigns these dollars of refunds to entire order.
+                #           NOTICE: format is different if dollars of refund rather than quantity of product in other cases. In this case we express dollars in 'shop'
+                #                   but the refund was really granted in currency of customer and is in 'presentment'.
 
-                skus_refunded[REFUND] = totalRefundedSet
+                skus_refunded[REFUND] = {'shop':totalRefundedSet_shop,'presentment':totalRefundedSet_presentment}
 
         else:
 
-            # 2/5/2025. this block for sub-category 5). is for a failure to match any of the 5 sub-categories. No use cases so far.
+            # 2/5/2025. this block for sub-category 5). is for a failure to match any of the 4 success sub-categories. No use cases so far.
 
             desc = refund_desc(r_ind, refunds)
             print('order_num',order_num,'desc',desc)
@@ -143,20 +152,27 @@ def build_skus_refunded_graphql(order_num,refunds_list,line_items,note,debug):
 
     return skus_refunded, refund_note, refund_created_at, note
 
-def improve_events_and_get_items(events):
+def improve_items_with_events(events):
     ev_email = None
     ev_phone_num = None
+    updated_from_admin_email = None
     for ev in events:
         ev['createdAt'] = convert_utc_to_local_datetime(ev['createdAt'])
         mes = ev['message']
         # 2/18/2025. parse messages like this:
         #            for #13167. 'message': 'Joe Moskowitz sent a pos and mobile receipt SMS to Donald A Kaplan (+1 917-696-4343).'},
         #            for #13136. 'message': 'Joe Moskowitz sent an order receipt email to James A Myruski (astrojim1@live.com).'},
+        #            for #17712. 'message': 'Joe Moskowitz updated the email for this order from hqu@spectrumoi.com to hincequ@gmail.com.'
         if 'receipt email' in mes and '(' in mes and ')' in mes:
             ev_email = mes[mes.index('(')+1:mes.index(')')]
+        if 'updated the email for this order' in mes and ' to ' in mes:
+            updated_from_admin_email = mes[mes.index(' to ')+4:-1]
         if 'receipt SMS' in mes and '(' in mes and ')' in mes:
             ev_phone_num = mes[mes.index('(')+1:mes.index(')')]
             ev_phone_num = normalize_phone_num(ev_phone_num)
+    if updated_from_admin_email:
+        # 3/10/2026. example is #17712. if I went to the trouble of updating the email from the Shopify Admin app then it should get priority.
+        ev_email = updated_from_admin_email
     return ev_email,ev_phone_num
 
 def get_discount_codes(order):
@@ -222,6 +238,38 @@ def getBestAddress(addresses):
 
     return address
 
+EXCLUDED_SUFFIXES = (' Font', ' Color', ' Style')
+def remove_invalid_custom_attributes(custom_attributes):
+
+    # 3/102026. this function removes invalid items injected by 'PC - Product Options' for their implementation. these items aren't custom fields seen on shopify product.
+    #           example is order #17677 where we had entries 'Booths from this order' : '17377' and the bogus 'Booths from this order Font' : ''.
+    #           ChatGPT recommends I avoid the 3 suffixes ' Font', ' Color', ' Style'.
+
+    if not custom_attributes:
+        return
+    keys = []
+    for na in custom_attributes:
+        keys.append(na['key'])
+    excluded_keys = []
+    for key in keys:
+        excluded_suffix = ''
+        for s in EXCLUDED_SUFFIXES:
+            if key.endswith(s):
+                excluded_suffix = s
+                break
+        if excluded_suffix:
+            if key[:-len(excluded_suffix)] in keys:
+                excluded_keys.append(key)
+                continue
+
+    if excluded_keys:
+        for i in range(len(custom_attributes)-1,-1,-1):
+            key = custom_attributes[i]['key']
+            if key in excluded_keys:
+                del custom_attributes[i]
+
+    return
+
 def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debug,sctList,refundNotes,note_attributes_Notes,excludedCovidSkuOrdersDict,debug,lineItemCount,verbose):
 
     # 12/30/2022. this function is where we convert AccessShopify.rawOrdersTupList(passed in here as orders) which is in shopify form straight from graphql to ShopifyCommonTup which is close to final form.
@@ -269,7 +317,7 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
             print(f"Skipping order #{order_num}, created at:{created_at}. This order was canceled as indicated by order['cancelledAt']:{cancelled_at}")
             continue
         note = '' if not order['note'] else order['note']
-        note_attributes = order['customAttributes'] # 1/2/2025. previously was note_attributes in rester api.
+        note_attributes = order[CUSTOM_ATTRIBUTES_KEY()] # 1/2/2025. previously was note_attributes in rester api.
         if not order.get('customer'):
             #print 'failed loading order',i
             #print order
@@ -279,7 +327,8 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
         if customer is None:
             # 1/26/2024. needed this for order_num 12904
             customer = {}
-        total_discount = float(order['currentTotalDiscountsSet']['shopMoney']['amount'])  # 1/2/2025. previously was total_discounts
+        total_discounts             = float(order['currentTotalDiscountsSet']['shopMoney']['amount'])
+        total_discounts_presentment = float(order['currentTotalDiscountsSet']['presentmentMoney']['amount'])
         discount_codes = get_discount_codes(order)
 
         name,first_name,last_name = getName(customer)
@@ -306,9 +355,15 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
         country_code = default_address.get('country',MISSING) # 1/3/2025. previously was country_code
 
         phone_num = normalize_phone_num(getItem(default_address,'phone'))
-        ev_email,ev_phone_num = improve_events_and_get_items(order['events'])
-        email = email or ev_email
+        ev_email,ev_phone_num = improve_items_with_events(order['events'])
+
+        # 3/10/2026. these next 2 lines are confusing. notice we give priority to event email over standard email but we flip it for phone_num and give priority to standard.
+        #            originally both email and phone gave priority to standard but I needed to flip that for #17712, neaf_vendor_booth_premium_from_standard_early_bird where
+        #            standard was hqu@spectrumoi.com but I editted to hincequ@gmail.com in the admin. I did that so it matchs email for #17309.
+        #            I have no use case to flip phone. If one comes up in future I will flip and add comment here.
+        email = ev_email or email
         phone_num = phone_num or ev_phone_num or ''
+
         refunds = order['refunds']
         line_items = order['lineItems'] # 1/2/2025. previously was line_items
         skus_refunded,refund_note,refund_created_at,note = build_skus_refunded_graphql(order_num,refunds,line_items,note,debug)
@@ -330,6 +385,7 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
 
         found_valid_line_item = False
         for line_item in line_items:
+            remove_invalid_custom_attributes(line_item[CUSTOM_ATTRIBUTES_KEY()])
             sku = line_item['sku'] if line_item['sku'] else MISSING
 
             if order_num == '15252' and line_item['id'].endswith('14821595742290'):
@@ -341,18 +397,14 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
 
             if sku_key == MEMBERSHIP:
 
-                # TODO 1/2/2025. this block doesn't look meaningful since only purpose might have been to handle
-                #                MEMBERSHIP:('rac_membership','rac_magazine') in SKUS_TO_LOAD_DICT which is atypical because it has 2 values.
-                #                it might not be needed.
+                # 1/2/2025. membership needs special treatment because MEMBERSHIP:('rac_membership','rac_magazine') in SKUS_TO_LOAD_DICT which is atypical because it has 2 values.
+                #           this block handle that case.
 
                 if skus_to_load[0] not in sku and skus_to_load[1] not in sku:
                     continue
                 else:
-                    # 1/26/2024. we have found valid membership order but no concept of discount for membership so just use 0. example is order_num 13657.
+                    # 1/26/2024. we have found valid membership order but no concept of discount for membership so just use 0.
                     discount_allocations = 0.0
-                    if not email and not phone_num:
-                        # TODO 2/11/2025. WARNING: get_phone_or_email_from_order_event_timeline use rester. its not yet converted to graphql.
-                        email, phone_num = get_phone_or_email_from_order_event_timeline(order_id)
 
             else:
 
@@ -385,11 +437,17 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
                 if sku in skus_refunded:
                     quantityRefunded = skus_refunded.get(sku)
                     if quantityRefunded == quantity:
-                        # 2/6/2025. sku has been refunded in full, its gone. we want to retain some evidence of the disappeared sku so modify display of sku string to indicate
-                        #           how many items are now gone. some examples are #7618, #9481, #11709.
-                        quantity = 0
-                        sku = '{0} {1}:{2}'.format(REFUND,quantityRefunded,sku)
-                        line_item['sku'] = sku
+                        if line_item['refundableQuantity'] == 0:
+                            # 2/3/2026. I added this extra clause on refundableQuantity to handle problem on #17367, Remote Observatory.
+                            #           problem was there were 2 line items for premium, each for 1. there were 2 because one had company name "Remote Observatory" and the other had
+                            #           "Pulsar Observatories". when I refunded 1 booth it chose to refund "Pulsar Observatories" and thus set its refundableQuantity to 0 so only
+                            #           treat that one as having been refunded.
+                            #           WARNING: this problem might re-occur if we have partial refund and duped line items. there is no treatment for this case in else block below.
+                            # 2/6/2025. sku has been refunded in full, its gone. we want to retain some evidence of the disappeared sku so modify display of sku string to indicate
+                            #           how many items are now gone. some examples are #7618, #9481, #11709.
+                            quantity = 0
+                            sku = '{0} {1}:{2}'.format(REFUND,quantityRefunded,sku)
+                            line_item['sku'] = sku
                     else:
                         # 3/7/2020. refund for partial quantity. decrease quantity by amount refunded. example is #9483.
                         quantity -= quantityRefunded
@@ -401,8 +459,8 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
                     discount_allocations = float(da_list[0]['allocatedAmountSet']['shopMoney']['amount'])
 
             found_valid_line_item = True
-            sct = ShopifyCommonTup(order_id,order_num,created_at,cancelled_at,note,note_attributes,customer,total_discount,discount_codes,discount_allocations,name,first_name,last_name,email,
-                                   default_address,province_code,country_code,phone_num,sku,quantity,refund_note,refund_created_at,line_item)
+            sct = ShopifyCommonTup(order_id,order_num,created_at,cancelled_at,note,note_attributes,customer,total_discounts,total_discounts_presentment,discount_codes,discount_allocations,name,
+                                   first_name,last_name,email,default_address,province_code,country_code,phone_num,sku,quantity,refund_note,refund_created_at,line_item)
             # 2/12/2025. lineItemCount is count of number of line items that are turned into ShopifyCommonTup objects.
             lineItemCount += 1
 
@@ -418,10 +476,10 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
 
         if found_valid_line_item and REFUND in skus_refunded:
             # 2/6/2025. special treatment is needed for refunds on this order, order_num. Typically refunds can be applied to single line items in an order. Not in this case.
-            #           apply the dollarsRefunded to the entire order. add additional ShopifyCommonTup to sctList for the negative amount of refund. example is #15314.
-            dollarsRefunded = skus_refunded[REFUND]
+            #           apply the dollarsRefunded to the entire order. add additional ShopifyCommonTup to sctList for the negative amount of refund. example is #15317.
+            moneyRefunded = skus_refunded[REFUND]
             sct = get_ShopifyCommonTup_highest_price(order_num,sctList)
-            sct = convert_ShopifyCommonTup_to_refund(dollarsRefunded,sct)
+            sct = convert_ShopifyCommonTup_to_refund(moneyRefunded,sct)
             sctList.append(sct)
 
     if debug:

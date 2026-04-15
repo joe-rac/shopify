@@ -4,10 +4,12 @@ import csv
 import copy
 import random
 from collections import namedtuple
-from consts import MEMBERSHIP,DONATION,RAD,NEAIC_ATTEND,NEAIC_EXHIBITOR,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAF_VENDOR,NEAF_SOLAR_STAR_PARTY,HSP,HSP_RAFFLE,RLS,MISSING,ADMIN,NEAF_ATTEND_DOOR_PRIZE
-from consts import SSP,TEST,NEAF_VIRTUAL_DOORPRIZE,ALL,NUMBER_OF_DOORPRIZE_WINNERS,NEAF_VIRTUAL_DOORPRIZE_DROPDOWN,NEAF_RELATED_PRODUCT_TYPES,NEAF_YEAR_DEFAULT,USE_GRAPHQL
+from consts import MEMBERSHIP,DONATION,RAD,CC_DOOR_PRIZE,NEAIC_ATTEND,NEAIC_EXHIBITOR,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAF_VENDOR,NEAF_SOLAR_STAR_PARTY,HSP,HSP_RAFFLE,RLS
+from consts import ADMIN,NEAF_ATTEND_DOOR_PRIZE,SSP,TEST,NEAF_VIRTUAL_DOORPRIZE,ALL,NUMBER_OF_DOORPRIZE_WINNERS,NEAF_VIRTUAL_DOORPRIZE_DROPDOWN
+from consts import DEFAULT_DAY
 from utils import normalizeAddress,convertToStr,get_target_dict,writerow_UnicodeEncodeError,RAC_DIR,normalize_phone_num,get_max_len
-from utils import getFromProperties,getPropertiesDict,OrderTup,PROPERTIES_DICT,ORDER_FIELDS_LIST,NOTE_ATTRIBUTE_KEY,PROPERTIES_KEY
+from utils import getFromProperties,getPropertiesDict,OrderTup,PROPERTIES_DICT,ORDER_FIELDS_LIST,NOTE_ATTRIBUTE_KEY,CUSTOM_ATTRIBUTES_KEY
+from date_filter_utils import calc_default_date_window_from_product_type
 from access_shopify import AccessShopify
 from constant_contact import get_cc_door_prize_list
 
@@ -15,7 +17,7 @@ NEAIC_FIELDS = 'firstName lastName emailAddress phone state_country admissionCnt
 NEAIC_HEADER = ('First Name','Last Name','E-mail Address','Phone','Called','State/Country','WorkShop','Paid Amount($)','Date entered','Note')
 NeaicTup = namedtuple('NeaicTup',NEAIC_FIELDS)
 # heading for csv
-ORDER_HEADING = ['Seq','Order#','Date','Name','Address','Addr2','City/State','Phone#','email','Product','Dsc Code','Quan','Pr','Tot','Paid','Note']
+ORDER_HEADING = ['Seq','Order#','Date','Name','Company','Address','Addr2','City/State','Phone#','email','Product','Dsc Code','Quan','Pr','Tot','Paid','Note']
 ORDER_NUM_AT_DATE_FIELDS = 'date order_num desc'
 ORDER_NUM_AT_DATE_FIELDS_LIST = ORDER_NUM_AT_DATE_FIELDS.split()
 orderNumAtDateTup = namedtuple('orderNumAtDateTup',ORDER_NUM_AT_DATE_FIELDS)
@@ -25,8 +27,6 @@ EMAIL_MANAGEMENT_HEADER = ['GLOBAL','NEAF ATTENDEES & DOOR PRIZE LIST','NEAF VEN
 EMAIL_MANAGEMENT_FIELDS = 'glob neaf_attendees_and_door_prize neaf_vendors neaic_attendees memberships ssp dinner'
 EMAIL_MANAGEMENT_FIELDS_LIST = EMAIL_MANAGEMENT_FIELDS.split()
 EmailManagementTup =  namedtuple('EmailManagementTup',EMAIL_MANAGEMENT_FIELDS)
-
-CC_DOOR_PRIZE = 'cc_door_prize'
 
 def get_unique_key(dpt_dict,order_num):
     # 2/3/2019. there could be multiple products under a single order num. each will get it owns line in this program.  for example order #6612
@@ -63,7 +63,7 @@ class AccessOrders(AccessShopify):
 
     def getCompanyName(self,sct):
         companyName = ''
-        properties = sct.line_item.get(PROPERTIES_KEY())
+        properties = sct.line_item.get(CUSTOM_ATTRIBUTES_KEY())
         if not properties:
             return companyName
         for item in properties:
@@ -81,7 +81,7 @@ class AccessOrders(AccessShopify):
         # sct is union of all interesting order items in shopify. each product is interested in a subset of these items.
         # TODO create different tups analogous to OrderTup to hold items specific for each product. most likely all products will at least hold the OrderTup items.
         key =  get_unique_key(dpt_dict,sct.order_num)
-        properties = sct.line_item.get(PROPERTIES_KEY())
+        properties = sct.line_item.get(CUSTOM_ATTRIBUTES_KEY())
         requested_properties = {}
         phone_num_from_property = getFromProperties('Phone Number', properties, requested_properties)
         propertiesDict = getPropertiesDict(properties, ('Phone Number',))
@@ -92,7 +92,9 @@ class AccessOrders(AccessShopify):
         phone_num = normalize_phone_num(phone_num)
         # 2/5/2024. added round to price to handle non-USD purchases. example isorder #13671 for NEAIC 2024 admission from Leigh Bryan in Australia. paid $541AUD that was converted to $355.68USD
         #           even though product was $365.Rounded to $356
-        price = round(float(sct.line_item['originalUnitPriceSet']['shopMoney']['amount'])) if USE_GRAPHQL[0] else round(float(sct.line_item['price']))
+        price = round(float(sct.line_item['originalUnitPriceSet']['shopMoney']['amount']))
+        #price_presentment = round(float(sct.line_item['originalUnitPriceSet']['presentmentMoney']['amount']))
+        #currencyCode = sct.line_item['originalUnitPriceSet']['presentmentMoney']['currencyCode']
         total = price * sct.quantity
         paid = None
         created_at = sct.created_at[0:10] + ' ' + sct.created_at[11:19]
@@ -111,7 +113,7 @@ class Orders(object):
     # store this number of history items.
     NUM_HIST_ITEMS = 5
     # TODO 9/4/2022. add to SKUS_TO_LOAD_DICT and PRODUCT_TYPES together. when adding a new product category add here and also in SKUS_TO_LOAD_DICT in consts.py
-    PRODUCT_TYPES = (NEAF_ATTEND,NEAF_ATTEND_DOOR_PRIZE,NEAF_ATTEND_RAFFLE,NEAF_VENDOR,NEAF_SOLAR_STAR_PARTY,HSP,HSP_RAFFLE,RLS,SSP,TEST,MEMBERSHIP,DONATION,RAD,NEAIC_ATTEND,NEAIC_EXHIBITOR,
+    PRODUCT_TYPES = (NEAF_VENDOR,NEAF_ATTEND,NEAF_ATTEND_DOOR_PRIZE,NEAF_ATTEND_RAFFLE,NEAF_SOLAR_STAR_PARTY,NEAIC_ATTEND,NEAIC_EXHIBITOR,HSP,HSP_RAFFLE,RLS,SSP,TEST,MEMBERSHIP,DONATION,RAD,
                      CC_DOOR_PRIZE,NEAF_VIRTUAL_DOORPRIZE_DROPDOWN,ADMIN,ALL)
 
     def set_product_type(self,product_type):
@@ -134,6 +136,13 @@ class Orders(object):
         self.product_type = product_type
         return
 
+    def _appendMsg(self,msg):
+        if self.msg:
+            self.msg = self.msg +'\n' + msg
+        else:
+            self.msg = msg
+        return
+
     def __init__(self,product_type,number_of_address_rows=1,order_to_debug=None,verbose=False):
         self.error = ''
         self.order_to_debug = order_to_debug
@@ -147,12 +156,7 @@ class Orders(object):
             self.created_at_min = None
             self.created_at_max = None
         else:
-            if self.product_type in NEAF_RELATED_PRODUCT_TYPES:
-                self.created_at_min = str(int(NEAF_YEAR_DEFAULT) - 1) + '-07-01'
-            else:
-                start_date = datetime.datetime.now() - datetime.timedelta(days=370)
-                self.created_at_min = start_date.strftime('%Y-%m-%d') # '{0}-01-01'.format(start_year)
-            self.created_at_max = datetime.datetime.now().strftime('%Y-%m-%d')
+            self.created_at_min,self.created_at_max = calc_default_date_window_from_product_type(self.product_type)
         self.smallest_order_num = None
         self.largest_order_num = None
         self.run_time = datetime.datetime.now().strftime('%H:%M:%S')
@@ -177,13 +181,16 @@ class Orders(object):
     def build_from_cc(self):
         msg_cc = 'Start loading Constant Contact door prize entrants from {0} to {1}'.format(self.created_at_min,self.created_at_max)
         print(msg_cc)
-        ccdpt_list = get_cc_door_prize_list(self.created_at_min,self.created_at_max)
+        ccdpt_list,msg = get_cc_door_prize_list(self.created_at_min[:4],DEFAULT_DAY,raw_cc_to_csv=True)
+        msg_cc += msg
         date_to_cc_map = {}
         i = 1
         for ccdpt in ccdpt_list:
             order_num = None
             order_id = None
             created_at = ccdpt.modified_date
+            if created_at[:10] < self.created_at_min or created_at[:10] > self.created_at_max:
+                continue
             created_at += '_{0:04d}'.format(i)
             i += 1
             name = ccdpt.first_name+' '+ccdpt.last_name
@@ -258,6 +265,7 @@ class Orders(object):
             return propertiesWithGoodKeys
 
         goodPropertyKeys = set()
+        excluded_keys = set()
         for order_num,otup in self.full_order_dict.items():
             properties = otup.propertiesDict
             for desc in properties.keys():
@@ -274,7 +282,9 @@ class Orders(object):
         except Exception as ex:
             print('Exception:\n{0}\n'.format(ex))
 
+        i = 0
         for order_num, otup in self.full_order_dict.items():
+            i += 1
             propertiesWithGoodKeys = fixKeysInPropertiesDict(goodPropertyKeys,otup.propertiesDict)
             owptKwargs = otup._asdict()
             if BAD_KEY in owptKwargs:
@@ -283,10 +293,13 @@ class Orders(object):
             owptKwargs.update(propertiesWithGoodKeys)
             if BAD_KEY in owptKwargs:
                 del owptKwargs[BAD_KEY]
+            for ek in excluded_keys:
+                if ek in owptKwargs:
+                    del owptKwargs[ek]
             try:
                 owpt = OrderWithPropertiesTup(**owptKwargs)
             except Exception as ex:
-                print('Exception:\n{0}\n'.format(ex))
+                print('Exception for item {0} in self.full_order_dict:\n{1}\n'.format(i,ex))
             self.full_order_with_properties_dict[order_num] = owpt
 
         return
@@ -299,7 +312,7 @@ class Orders(object):
         self.full_order_dict.clear()
         if self.product_type == CC_DOOR_PRIZE:
             cc_msg,cc_full_order_dict = self.build_from_cc()
-            self.msg = cc_msg
+            self._appendMsg(cc_msg)
             self.full_order_dict.update(cc_full_order_dict)
         else:
             accessOrders = AccessOrders(self.product_type,self.created_at_min,self.created_at_max,order_to_debug=self.order_to_debug,verbose=self.verbose)
@@ -307,10 +320,7 @@ class Orders(object):
                 self.error = accessOrders.error
                 return
 
-            if USE_GRAPHQL[0]:
-                accessOrders.shopifyOrdersFromGraphQL()
-            else:
-                accessOrders.shopifyOrdersFromHttps()
+            accessOrders.shopifyOrdersFromGraphQL()
             if accessOrders.error:
                 self.error = accessOrders.error
                 return
@@ -323,7 +333,7 @@ class Orders(object):
                 return
 
             self.full_order_dict.update(accessOrders.raw)
-            self.msg = accessOrders.msg
+            self._appendMsg(accessOrders.msg)
             self.refundNotes = accessOrders.refundNotes
 
         # 2/26/2023. populate self.full_order_with_properties_dict
@@ -335,12 +345,8 @@ class Orders(object):
         return
 
     def create_dirs(self):
-        if not os.path.exists(self.order_dir):
-            print('Directory that holds order items of {0} does not exist. Creating it now.'.format(self.order_dir))
-            os.makedirs(self.order_dir)
-        if not os.path.exists(self.results_dir):
-            print('Directory that holds results csv files of {0} does not exist. Creating it now.'.format(self.results_dir))
-            os.makedirs(self.results_dir)
+        os.makedirs(self.order_dir,exist_ok=True)
+        os.makedirs(self.results_dir,exist_ok=True)
         return
 
     def shopifyLoad(self, created_at_min=None,created_at_max=None,order_to_debug=None ):
@@ -348,16 +354,17 @@ class Orders(object):
             self.error = 'Cannot run shopifyLoad. Entered this function with error:{0}'.format(self.error)
             return
 
+        self.order_to_debug = order_to_debug
         self.create_dirs()
 
-        # 3/13/2023. this block override default created_at_min and created_at_max set in Orders cstr
+        # 3/13/2023. this block uses passed in values of created_at_min and created_at_max to override values set in Orders cstr from calc_default_date_window_from_product_type.
         if created_at_min:
-            if self.order_to_debug and USE_GRAPHQL[0]:
+            if self.order_to_debug:
                 self.error = 'In shopifyLoad order_to_debug:{0} and created_at_min:{1}. created_at_min must be None if using order_to_debug.'.format(self.order_to_debug,created_at_min)
                 return
             self.created_at_min = created_at_min
         if created_at_max:
-            if self.order_to_debug and USE_GRAPHQL[0]:
+            if self.order_to_debug:
                 self.error = 'In shopifyLoad order_to_debug:{0} and created_at_max:{1}. created_at_max must be None if using order_to_debug.'.format(self.order_to_debug,created_at_max)
                 return
             self.created_at_max = created_at_max
@@ -404,14 +411,14 @@ class Orders(object):
         return hints.format(self.created_at_min,allProductTypes,self.product_type,self.order_dir,self.results_dir,numRawShopify,shopifyCnt,NUMBER_OF_DOORPRIZE_WINNERS,
                             refundNotesStr,msgStr,errStr)
 
-    def append_row(self,msgs,fmt,cnt,k,created_at,name,address,phone_num,email,sku,discount_code,quantity,price,total,paid,note):
+    def append_row(self,msgs,fmt,cnt,k,created_at,name,company,address,phone_num,email,sku,discount_code,quantity,price,total,paid,note):
         cnt = str(cnt)+'.' if cnt != '' else ''
         quantity = str(quantity) if quantity != '' else ''
         price = str(price) if price != '' else ''
         total = str(total) if total != '' else ''
         paid = str(paid)   if paid  != '' else ''
         try:
-            _msg = fmt.format(cnt,k,created_at,name,address,phone_num,str(email),sku,discount_code,quantity,price,total,paid,note)
+            _msg = fmt.format(cnt,k,created_at,name,company,address,phone_num,str(email),sku,discount_code,quantity,price,total,paid,note)
         except Exception as ex:
             _msg = ex
             print(_msg)
@@ -440,6 +447,7 @@ class Orders(object):
         key_max = 6
         created_at_max = 4
         name_max = 4
+        company_max = 7
         address1_max = 7
         address2_max = 5
         address3_max = 5
@@ -460,6 +468,7 @@ class Orders(object):
             key_max = get_max_len(k,key_max)
             created_at_max = get_max_len(v.created_at,created_at_max)
             name_max = get_max_len(v.name,name_max)
+            company_max = get_max_len(v.company_name,company_max)
             address1_max = get_max_len(v.address1,address1_max)
             address2_max = get_max_len(v.address2,address2_max)
             address3_max = get_max_len(v.address3,address3_max)
@@ -472,7 +481,7 @@ class Orders(object):
             total_max = get_max_len(v.total,total_max)
             paid = round(v.paid)
             paid_max = get_max_len(paid,paid_max)
-            note = v.note[:43] + '...' if len(v.note) > 42 else v.note
+            note = v.note[:80] + '...' if len(v.note) > 79 else v.note
             note_max = get_max_len(note,note_max)
 
         if self.number_of_address_rows == 1:
@@ -482,14 +491,14 @@ class Orders(object):
         else:
             address1_max = max(address1_max,address2_max,address3_max)
 
-        fmt = '{{:{0}s}}  {{:{1}s}}    {{:{2}s}}  {{:{3}s}}  {{:{4}s}}  {{:{5}s}}  {{:{6}s}}  {{:{7}s}}  {{:{8}s}}  {{:{9}s}}  {{:{10}s}}  {{:{11}s}} {{:{12}s}} {{:{13}s}}'
-        fmt = fmt.format(cnt_max,key_max,created_at_max,name_max,address1_max,phone_num_max,email_max,sku_max,dc_max,quantity_max,price_max,total_max,paid_max,note_max)
+        fmt = '{{:{0}s}}  {{:{1}s}}    {{:{2}s}}  {{:{3}s}}  {{:{4}s}}  {{:{5}s}}  {{:{6}s}}  {{:{7}s}}  {{:{8}s}}  {{:{9}s}}  {{:{10}s}}  {{:{11}s}}  {{:{12}s}} {{:{13}s}} {{:{14}s}}'
+        fmt = fmt.format(cnt_max,key_max,created_at_max,name_max,company_max,address1_max,phone_num_max,email_max,sku_max,dc_max,quantity_max,price_max,total_max,paid_max,note_max)
 
         h_fmt = fmt[:3]+'s} '+fmt[6:]
         # modify address items of 'Address','Addr2','City/State' and replace with 'Address' only
         order_heading = copy.deepcopy(ORDER_HEADING)
-        del order_heading[5:7]
-        order_heading[4] = 'City/State/Zip' if self.number_of_address_rows == 1 else order_heading[4]
+        del order_heading[6:8]
+        order_heading[5] = 'City/State/Zip' if self.number_of_address_rows == 1 else order_heading[5]
         _msg = h_fmt.format(*order_heading)
         msgs.append(_msg)
 
@@ -501,9 +510,9 @@ class Orders(object):
 
             # print 1, 2 or 3 address rows
             first_address_item = v.address3 if self.number_of_address_rows == 1 else v.address1
-            note = v.note[:43] + '...' if len(v.note) > 42 else v.note
+            note = v.note[:80] + '...' if len(v.note) > 79 else v.note
             paid = round(v.paid)
-            self.append_row(msgs,fmt,cnt,k,v.created_at,v.name,first_address_item,v.phone_num,v.email,v.sku,v.discount_code,v.quantity,v.price,v.total,paid,note)
+            self.append_row(msgs,fmt,cnt,k,v.created_at,v.name,v.company_name,first_address_item,v.phone_num,v.email,v.sku,v.discount_code,v.quantity,v.price,v.total,paid,note)
             if self.number_of_address_rows == 3 and v.address2:
                 self.append_row(msgs,fmt,'','','','',v.address2,'','','','','','','')
             if self.number_of_address_rows in (2,3):
@@ -546,13 +555,23 @@ class Orders(object):
         return fname
 
     def get_latest_neaic_order_number(self):
+        error = ''
         prefix = 'customized_neaic_attend_order_num_'
         for (dirpath, dirnames, filenames) in os.walk(self.results_dir):
             break
         neaic_reports = [f for f in filenames if f.startswith(prefix)]
-        neaic_last_order = sorted([f[f.index('_to_')+4:-5] for f in neaic_reports])[-1]
+        if not neaic_reports:
+            error = f'\nFailure finding prior runs of NEAIC registrations in {self.results_dir}.\n{len(filenames)} files exist in that folder but none have names that start with {prefix}.'
+            return None,None,error
+        neaic_last_orders = []
+        for nr in neaic_reports:
+            nr = nr[:nr.find('.')]
+            toks = nr.split('_')
+            neaic_last_orders.append(int(toks[-1]))
+        neaic_last_orders = sorted(neaic_last_orders)
+        neaic_last_order = str(neaic_last_orders[-1])
         file_with_neaic_last_order = [f for f in neaic_reports if neaic_last_order in f][0]
-        return int(neaic_last_order),file_with_neaic_last_order
+        return int(neaic_last_order),file_with_neaic_last_order,error
 
     def neaic_attendee_dump_to_csv(self, incremental_since_last_run = False):
 
@@ -614,8 +633,12 @@ class Orders(object):
             return msg
 
         if incremental_since_last_run:
-            neaic_last_order, file_with_neaic_last_order = self.get_latest_neaic_order_number()
-            msg_incremental='In neaic_attendee_dump_to_csv order_num:{0} processed in prior run that built {1}.'.format(neaic_last_order,file_with_neaic_last_order)
+            neaic_last_order, file_with_neaic_last_order,error = self.get_latest_neaic_order_number()
+            if error:
+                return error
+            msg_incremental='In neaic_attendee_dump_to_csv while running in incremental mode last order processed in prior run that built {0} was {1}.' +\
+                '\nBuild new csv file for all NEAIC orders beyond {1}.'
+            msg_incremental = msg_incremental.format(file_with_neaic_last_order,neaic_last_order)
             print(msg_incremental)
             msg_incremental += '\n'
         else:
@@ -654,26 +677,29 @@ class Orders(object):
 
         fname = self.csv_fname(prefix='customized')
 
-        with open(fname,'w') as csv_file:
-            wr = csv.writer(csv_file,  quoting=csv.QUOTE_ALL, lineterminator='\n') # delimiter=' ',quotechar='|', quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
-            wr.writerow(NEAIC_HEADER)
-            for ntup in ntupDict.values():
+        if ntupDict:
+            with open(fname,'w',encoding="utf-8-sig") as csv_file:
+                wr = csv.writer(csv_file,  quoting=csv.QUOTE_ALL, lineterminator='\n') # delimiter=' ',quotechar='|', quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
+                wr.writerow(NEAIC_HEADER)
+                for ntup in ntupDict.values():
 
-                if ntup.admissionCnt == 1:
-                    wsFront = 'Registration - NEAIC Admission'
-                elif ntup.admissionCnt > 1:
-                    wsFront = '{0} Registrations - NEAIC Admissions'.format(ntup.admissionCnt)
-                else:
-                    wsFront = '*** NOT REGISTERED *** '
+                    if ntup.admissionCnt == 1:
+                        wsFront = 'Registration - NEAIC Admission'
+                    elif ntup.admissionCnt > 1:
+                        wsFront = '{0} Registrations - NEAIC Admissions'.format(ntup.admissionCnt)
+                    else:
+                        wsFront = '*** NOT REGISTERED *** '
 
-                wsBack = '' if ntup.workShopCnt == 0 else ' +{0}WS'.format(ntup.workShopCnt)
-                workshopStr = '{0}{1}'.format(wsFront,wsBack)
-                paidAmountStr = '${:.2f}'.format(ntup.paidAmount)
+                    wsBack = '' if ntup.workShopCnt == 0 else ' +{0}WS'.format(ntup.workShopCnt)
+                    workshopStr = '{0}{1}'.format(wsFront,wsBack)
+                    paidAmountStr = '${:.2f}'.format(ntup.paidAmount)
 
-                ntrow = [ntup.firstName,ntup.lastName,ntup.emailAddress,ntup.phone,' ',ntup.state_country,workshopStr,paidAmountStr,'',ntup.note]
-                writerow_UnicodeEncodeError(wr,ntrow)
+                    ntrow = [ntup.firstName,ntup.lastName,ntup.emailAddress,ntup.phone,' ',ntup.state_country,workshopStr,paidAmountStr,'',ntup.note]
+                    writerow_UnicodeEncodeError(wr,ntrow)
 
-        msg = 'Find results for {0} NEAIC attendees at {1} .\n{2}'.format(len(ntupDict),fname,msg_incremental)
+            msg = 'Find results for {0} NEAIC attendees at {1} .\n{2}'.format(len(ntupDict),fname,msg_incremental)
+        else:
+            msg = 'No NEAIC attendees processed. No csv file created.'
 
         return msg
 
@@ -686,7 +712,7 @@ class Orders(object):
             return msg
 
         fname = self.csv_fname()
-        with open(fname,'w') as csv_file:
+        with open(fname,'w',encoding="utf-8-sig") as csv_file:
             wr = csv.writer(csv_file,  quoting=csv.QUOTE_ALL, lineterminator='\n') # delimiter=' ',quotechar='|', quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
             wr.writerow(self.orderWithPropertiesList)
             for key in reversed(self.order_keys):
@@ -701,7 +727,7 @@ class Orders(object):
 
         def build_csv_file(fname,mrows_winners):
 
-            with open(fname,'w') as csv_file:
+            with open(fname,'w',encoding="utf-8-sig") as csv_file:
                 wr = csv.writer(csv_file,  quoting=csv.QUOTE_ALL, lineterminator='\n')
                 wr.writerow(ORDER_FIELDS_LIST)
                 for mrow in mrows_winners:
@@ -749,7 +775,7 @@ class Orders(object):
         fname = self.csv_fname()
         rowCnt = 0
         mrows = []
-        with open(fname,'w') as csv_file:
+        with open(fname,'w',encoding="utf-8-sig") as csv_file:
             wr = csv.writer(csv_file, quoting=csv.QUOTE_ALL, lineterminator='\n')
             wr.writerow(ORDER_FIELDS_LIST)
             indQuantity = ORDER_FIELDS_LIST.index('quantity')
@@ -866,7 +892,7 @@ class Orders(object):
             emListCsv.append(emItem)
 
         fname = self.email_management_csv_fname()
-        with open(fname,'w') as csv_file:
+        with open(fname,'w',encoding="utf-8-sig") as csv_file:
             wr = csv.writer(csv_file, quoting=csv.QUOTE_ALL,lineterminator='\n')
             wr.writerow(EMAIL_MANAGEMENT_HEADER)
             for emItem in emListCsv:

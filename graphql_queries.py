@@ -30,11 +30,7 @@ ORDER_DETAILS = """
           id
           createdAt
           note
-          totalRefundedSet {
-            shopMoney {
-              amount
-            }
-          }
+          totalRefundedSet {shopMoney {amount currencyCode} presentmentMoney { amount currencyCode }}
           refundLineItems(first: 100) {
             edges {
               node {
@@ -44,21 +40,13 @@ ORDER_DETAILS = """
                   title
                   quantity
                   currentQuantity
-                  originalUnitPrice
-                  discountedUnitPrice 
+                  originalUnitPriceSet {shopMoney {amount currencyCode} presentmentMoney {amount currencyCode}}
+                  discountedUnitPriceSet {shopMoney {amount currencyCode} presentmentMoney {amount currencyCode}}
                 }
                 quantity
                 restockType
-                priceSet {
-                  shopMoney {
-                    amount
-                  }
-                }
-                subtotalSet {
-                  shopMoney {
-                    amount
-                  }
-                }
+                priceSet {shopMoney {amount currencyCode} presentmentMoney { amount currencyCode }}
+                subtotalSet {shopMoney {amount currencyCode} presentmentMoney { amount currencyCode }}
               }
             }
           }
@@ -75,19 +63,9 @@ ORDER_DETAILS = """
           }
         }
         
-        currentTotalDiscountsSet {
-          shopMoney {
-            amount
-            currencyCode
-          }
-        }
+        currentTotalDiscountsSet {shopMoney {amount currencyCode} presentmentMoney { amount currencyCode}}        
+        totalPriceSet {shopMoney {amount currencyCode} presentmentMoney { amount currencyCode}}
         
-        totalPriceSet {
-          shopMoney {
-            amount
-            currencyCode
-          }
-        }
         customer {
           firstName
           lastName
@@ -114,44 +92,18 @@ ORDER_DETAILS = """
               quantity
               currentQuantity
               refundableQuantity
-              discountedTotalSet {
-                shopMoney {
-                  amount
-                }
-              }
-              originalUnitPriceSet {
-                shopMoney {
-                  amount
-                }
-              }
-              originalTotalSet {
-                shopMoney {
-                  amount
-                }
-              }
-              discountedUnitPriceSet {
-                shopMoney {
-                  amount
-                }
-              }
+              discountedTotalSet {shopMoney {amount} presentmentMoney {amount}}
+              originalUnitPriceSet {shopMoney {amount} presentmentMoney {amount currencyCode}}
+              originalTotalSet {shopMoney {amount} presentmentMoney {amount}}
+              discountedUnitPriceSet {shopMoney {amount} presentmentMoney {amount}}
               discountAllocations {
-                allocatedAmountSet {
-                  shopMoney {
-                    amount
-                  }
-                }
+                allocatedAmountSet {shopMoney {amount} presentmentMoney {amount}}
               }
-              customAttributes {
-                key
-                value
-              }
+              customAttributes {key value}
             }
           }
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
-        }
+          pageInfo {hasNextPage endCursor}
+       }
 """
 
 ORDERS_BY_SKU_BETWEEN_DATES = """
@@ -162,10 +114,7 @@ ORDERS_BY_SKU_BETWEEN_DATES = """
         INSERT_ORDER_DETAILS_HERE
       }
     }  
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
+    pageInfo {hasNextPage endCursor}
   }
 }
 """
@@ -178,10 +127,7 @@ ORDERS_BETWEEN_DATES = """
         INSERT_ORDER_DETAILS_HERE
       }
     }  
-    pageInfo {
-      hasNextPage
-      endCursor
-    }
+    pageInfo {hasNextPage endCursor}
   }
 }
 """
@@ -244,3 +190,18 @@ MUTATE_CUSTOM_ATTRIBUTES = """
     }
 """
 
+ORDER_ID_AND_NOTE_ATTRIBUTES = """
+{
+  orders(query: "name:#ORDER_NUM",first: 10, ) {
+    edges {
+      node {
+        id
+        customAttributes {
+          key
+          value
+        }
+      }
+    }  
+  }
+}
+"""

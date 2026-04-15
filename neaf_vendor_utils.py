@@ -1,21 +1,7 @@
 
-import json
 import pprint
 from dateutil import parser
 import datetime
-# install with
-# pip install requests
-import requests
-import tracemalloc
-
-# 2/6/2022. inferior spell check methods.
-# install with
-# pip install pyspellchecker
-#from spellchecker import SpellChecker
-# install with
-# pip install pyenchant
-# use pip3 on mac
-#import enchant # not interesting, it suggested replacing both Willmann and Wlllmann with Mailman
 
 import sys
 import os
@@ -23,9 +9,9 @@ import copy
 from consts import REFUND,DECLINED,ADMIN_API_VERSION,SHOP_NAME
 from credentials import Credentials
 from graphql_queries import MUTATE_CUSTOM_ATTRIBUTES
+from graphql_utils import mutate_custom_attributes
 from utils import NeafVendorPropertiesTup,normalizeAddress,NeafVendorTup,OrderDetailTup,OrderPropertiesTup,RAC_DIR,NOTE_ATTRIBUTE_KEY
-from utils import NeafSSTup,get_default_neaf_year,getFromProperties,USE_GRAPHQL
-from access_shopify import goodDateStr
+from utils import NeafSSTup,get_default_neaf_year,getFromProperties,goodDateStr
 from pdf_neaf_vendor_invoice import convert_text_to_pdf_neaf_invoice
 
 # 1/26/2025. 2 critical functions for processing order_note_attributes are applyOrderNoteAttributeEdit and useOrderNoteAttributeEdits
@@ -79,6 +65,11 @@ EDIT_ACTION_TO_ACTION_MAP = {DELETE_ORIGINAL_BADGE_ACTION:DELETE_ORIGINAL_BADGE,
                              ORDER_NOTE_ACTION:ORDER_NOTE,COMPANY_NAME_ACTION:COMPANY_NAME,NAME_ACTION:NAME,EMAIL_ACTION:EMAIL,
                              PRIZE_DONATION_ACTION:PRIZE_DONATION,PRIZE_DONATION_VALUE_ACTION:PRIZE_DONATION_VALUE,
                              EXCLUDE_ACTION:EXCLUDE,DONATION_ACTION:DONATION,DECLINE_NEAF_2023_ACTION:DECLINE_NEAF_2023,DELETE_PRIOR_EDIT_ACTION:DELETE_PRIOR_EDIT}
+EDIT_ACTION_VALUES = [value for value in EDIT_ACTION_TO_ACTION_MAP.values()]
+def validate_EDIT_ACTION_VALUES():
+    if len(EDIT_ACTION_VALUES) != len(set(EDIT_ACTION_VALUES)):
+        raise Exception(f"EDIT_ACTION_VALUES:{EDIT_ACTION_VALUES} is invalid. It contains dupes. All values must be distinct.")
+validate_EDIT_ACTION_VALUES()
 
 DONATION_SKU = 'THIS ORDER HAS BEEN CONVERTED TO A DONATION'
 EXCLUDE_SKU = 'THIS ORDER IS EXCLUDED AND WILL BE IGNORED'
@@ -104,9 +95,17 @@ def getExtraBadgeNamesList(extra_badge_names):
     ebn_list = []
     if extra_badge_names:
         toks = extra_badge_names.split('\r')
+        num_carriage_returns = len(toks)
         toks = [tok.strip().replace('\n','') for tok in toks]
         for tok in toks:
-            toks2 = tok.split(',')
+            if num_carriage_returns > 1:
+                # 3/13/2026. this block added for #17376 which has 8 'Extra Badge Names'. they are all CR delimited and 7 of them loke like this, 'WU, PENG Paul',
+                #            previously those items would be split into 2 toks. Now we see that the intent of the user was to delimit badge names by CR, not ','.
+                #            the previous logic would have supported a mix of ',' and CF delimiters. its not clear if we ever had example of both CR and ','.
+                #            whatever, keep an eye on this issue. I told ChatGPT about it. If I'm it will remember where I put this fix and remind me to repair here.
+                toks2 = [tok]
+            else:
+                toks2 = tok.split(',')
             ebn_list.extend([tok2.strip() for tok2 in toks2 if tok2])
     return ebn_list
 
@@ -134,7 +133,7 @@ def confirm_no_unexpected_fields_in_properties(requested_properties,properties):
     error = "Unexpected items of '{0}' found in properties.".format(bad_items) if bad_items else ''
     return error
 
-def set_vendor_properties_tup(properties,order_num,name,email):
+def set_vendor_properties_tup(properties):
 
     requested_properties = {}
     company_from_property = getFromProperties('My Company Name',properties,requested_properties)
@@ -147,7 +146,9 @@ def set_vendor_properties_tup(properties,order_num,name,email):
     name_on_badge = getFromProperties('Name on Badge',properties,requested_properties)
     badge1_name = getFromProperties('Name on 1st Badge',properties,requested_properties)
     badge2_name = getFromProperties('Name on 2nd Badge',properties,requested_properties)
-    requested_booth_loc = getFromProperties('Req. Approximate Location',properties,requested_properties) or getFromProperties('Approx. Desired Location **',properties,requested_properties)
+    requested_booth_loc = getFromProperties('Req. Approximate Location',properties,requested_properties) or \
+                          getFromProperties('Approx. Desired Location **',properties,requested_properties)
+    get_booths_from = getFromProperties('Get booths from this order',properties,requested_properties)
     prize1 = getFromProperties('Prize Donation 1',properties,requested_properties)
     prize1_value = getFromProperties('Prize 1 Retail Value',properties,requested_properties)
     prize2 = getFromProperties('Prize Donation 2',properties,requested_properties)
@@ -158,7 +159,7 @@ def set_vendor_properties_tup(properties,order_num,name,email):
     extra_badge_names = getExtraBadgeNamesList(extra_badge_names)
     error = confirm_no_unexpected_fields_in_properties(requested_properties,properties)
 
-    nvpt = NeafVendorPropertiesTup(company_from_property,cellno,name_on_badge,badge1_name,badge2_name,requested_booth_loc,prize1,prize1_value,prize2,prize2_value,extra_badge_names,
+    nvpt = NeafVendorPropertiesTup(company_from_property,cellno,name_on_badge,badge1_name,badge2_name,requested_booth_loc,get_booths_from,prize1,prize1_value,prize2,prize2_value,extra_badge_names,
                                    ive_reviewed_vendor_packet,error)
 
     return nvpt
@@ -177,7 +178,7 @@ def get_neaf_year(neaf_year):
 
 def goodDatetimeStr(dstr):
     dt = parser.parse(dstr)
-    return dt.strftime('%m/%d/%Y %H:%M:%S')
+    return dt.strftime('%m/%d/%Y %H:%M')
 
 def convertToKey(identifier):
     if not identifier:
@@ -274,34 +275,32 @@ def appendError(tup,error):
         tup = tup._replace(error=orig_error+' '+error)
     return tup
 
-def appendMsg(origMsg,msg):
-    if not origMsg and msg:
-        origMsg = msg
-    elif origMsg and msg:
-        origMsg += ' ' + msg
-    return origMsg
 
 def get_price_in_shopifyCommonTup(sct):
     sku = sct.sku
     # standard products paid by credit card use this standard shopify price
     # 2/5/2024. added round because foreign customers payments converted to USD and there are decimals that should be ignored.
-    price = round(float(sct.line_item['originalUnitPriceSet']['shopMoney']['amount'])) if USE_GRAPHQL[0] else round(float(sct.line_item['price']))
-    return price
+    price = round(float(sct.line_item['originalUnitPriceSet']['shopMoney']['amount']))
+    price_presentment = round(float(sct.line_item['originalUnitPriceSet']['presentmentMoney']['amount']))
+    currencyCode = sct.line_item['originalUnitPriceSet']['presentmentMoney']['currencyCode']
+    return price,price_presentment,currencyCode
 
 def setCost(nvt,sct):
 
-    price = get_price_in_shopifyCommonTup(sct)
+    price,price_presentment,currencyCode = get_price_in_shopifyCommonTup(sct)
     qty = sct.quantity
-    cost = price * qty
+    cost             = price             * qty
+    cost_presentment = price_presentment * qty
 
     # total due is typically, by definition, 0 because all orders paid in full by credit card.
     # its also 0 for EDUCATION discount code since they pay nothing. Its cost for discount code CHECK since they pay nothing online but owe
     # full amount by check
-    total_discounts = 0.0 if nvt.discount_codes == 'CHECK' else nvt.total_discounts
-    total_due = None # total_due is calculated after all the line items under a given order are processed in apply_discount function.
+    total_discounts             = 0.0 if nvt.discount_codes == 'CHECK' else nvt.total_discounts
+    total_discounts_presentment = 0.0 if nvt.discount_codes == 'CHECK' else nvt.total_discounts_presentment
+    total_due             = None # total_due is calculated after all the line items under a given order are processed in apply_discount function.
+    total_due_presentment = None
     if ',' in nvt.discount_codes:
-        msg = "discount_codes of '{0}' are invalid. Only a single discount code is allowed.".format(nvt.discount_codes)
-        nvt = appendError(nvt,msg)
+        nvt = appendError(nvt,f"discount_codes of '{nvt.discount_codes}' are invalid. Only a single discount code is allowed.")
     sku = sct.sku
 
     if nvt.exclude_order_from_attribute == nvt.order_num:
@@ -331,8 +330,12 @@ def setCost(nvt,sct):
     elif sku.startswith('neaf_vendor_booth_standard'):
         nvt = nvt._replace(booth_st = cost,booth_st_qty = qty)
     # elif sku.startswith('neaf_vendor_booth_economy'):
-    #     nvt = nvt._replace(booth_econ = cost)
-    #     nvt = nvt._replace(booth_econ_qty = qty)
+    #     nvt = nvt._replace(booth_econ_qty = qty, booth_econ = cost)
+    elif sku.startswith('neaf_vendor_booth_premium_from_standard'):
+        nvt = nvt._replace(upgrade_st_to_prem = cost,upgrade_st_to_prem_qty = qty)
+    elif sku.startswith('neaf_vendor_booth_extra_ss_row'):
+        # 4/2/2026: orders that hit this block include 17724, 17728, 17729. all quantity adjustments for this sku made in NEAFVendor.populateTotalAdjBoothQty member function.
+        pass
     elif sku.startswith('neaf_vendor_booth_premium'):
         nvt = nvt._replace(booth_prem = cost,booth_prem_qty = qty)
     elif sku.startswith('neaf_vendor_extra_8ft_table'):
@@ -350,9 +353,10 @@ def setCost(nvt,sct):
 
     else:
         msg = 'Unsupported sku of {0} with cost:{1}, qty:{2}'
-        nvt = appendError(nvt,msg.format(sku,cost,qty))
+        nvt = appendError(nvt,f'Unsupported sku of {sku} with cost:{cost}, qty:{qty}')
     try:
-        nvt = nvt._replace(total_cost=cost,total_due=total_due,total_discounts=total_discounts)
+        nvt = nvt._replace(total_cost=cost,total_cost_presentment=cost_presentment,total_due=total_due,total_due_presentment=total_due_presentment,
+                           total_discounts=total_discounts,total_discounts_presentment=total_discounts_presentment,currencyCode=currencyCode)
     except:
         print('problem processing nvt:{0}'.format(nvt))
     return nvt
@@ -475,11 +479,11 @@ def mergeUnusualItems(orig_nvt,new_nvt):
         orig_nvt = orig_nvt._replace(declined_neaf_2023=new_nvt.declined_neaf_2023)
     return orig_nvt
 
-def mergedNvts(orig_nvt,new_nvt):
+def mergeNvts(orig_nvt, new_nvt):
 
-    # 12/19/2022. this function is heart of algorithm that builds full view of order under company. it's called under 2 very different circumstances.
-    # first it sums line items under orders, then it sums orders under companies by building full from raw when called from build_neaf_vendor_full_dict_from_shopify.
-    # this is critical function that build full from raw.
+    # XXX 12/19/2022. this function is heart of algorithm that builds full view of order under company. it's called under 2 very different circumstances.
+    #                 first it sums line items under orders, then it sums orders under companies by building full from raw when called from build_neaf_vendor_full_dict_from_shopify.
+    #                 this is critical function that build full from raw.
 
     if orig_nvt.order_num == '4391':
         #print 'xx'
@@ -488,13 +492,13 @@ def mergedNvts(orig_nvt,new_nvt):
     orig_nvt = orig_nvt._replace(created_at=created_at)
     orig_nvt = _merged_sku_and_quantity(orig_nvt,new_nvt)
     # 12/29/2022. summing means numerically adding numbers.
-    keys_to_be_summed = ('booth_st_qty','booth_st','booth_prem_qty','booth_prem','extra_tables_qty','extra_tables',
+    keys_to_be_summed = ('booth_st_qty','booth_st','booth_prem_qty','booth_prem','upgrade_st_to_prem_qty','upgrade_st_to_prem','extra_tables_qty','extra_tables',
            'extra_chairs_qty','extra_chairs','elec','carpet','additional_badges_qty','additional_badges','wifi','shipping_box',
-           'shipping_box_qty','shipping_pallet','shipping_pallet_qty','sponsorship','donation','total_cost')
+           'shipping_box_qty','shipping_pallet','shipping_pallet_qty','sponsorship','donation','total_cost','total_cost_presentment')
     orig_nvt = sumNvtItems(keys_to_be_summed,orig_nvt,new_nvt)
     # 12/29/2022 merging means concatenate string with "|"
     keys_to_be_merged = ('order_id','order_num','name','orderNumber','address1','address2','address3','phone_num','cellno','email','order_note','refund_note','refund_created_at',
-        'name_on_badge','badge1_name','badge2_name','extra_badge_names','prize_donation','prize_donation_value',
+        'name_on_badge','badge1_name','badge2_name','extra_badge_names','get_booths_from','prize_donation','prize_donation_value','currencyCode',
         'donation_order_from_attribute','exclude_order_from_attribute','error')
     # 12/29/2022. all remaining items that can't be summed or merged ae handled here.
     orig_nvt = mergeUnusualItems(orig_nvt,new_nvt)
@@ -503,6 +507,9 @@ def mergedNvts(orig_nvt,new_nvt):
         msg = "PROBLEM PROCESSING COMPANY: orig_nvt.company:'{0}', new_nvt.company:'{1}'. THEY SHOULD ALWAYS MATCH. FIX PROGRAM."
         raise Exception(msg.format(orig_nvt.company,new_nvt.company))
 
+    # 2/10/2026. TODO consider adjusting this block to retain all instances of company name. example are orders #15317 and #15705. #15317 has 5 instances of
+    #                 'Amateur Astronomers Assoc. of Pittsburgh' and 1 of 'Amateur Astronomers Assoc. of Pitt.'. By only retaining distinct values I lose info that
+    #                 'Amateur Astronomers Assoc. of Pittsburgh' is superior.
     for nc in new_nvt.company_from_property:
         if nc not in orig_nvt.company_from_property:
             orig_nvt.company_from_property.append(nc)
@@ -516,7 +523,7 @@ def mergedNvts(orig_nvt,new_nvt):
 def mergedDiscounts(orig_nvt,new_nvt):
     # merging of discounts cannot take place in mergedNvts because that function is called twice, first for merging line items under orders, then
     # for merging orders under companies. we can only merge discounts during that 2nd merge of orders under companies
-    keys = ('total_due','total_discounts','paid')
+    keys = ('total_due','total_due_presentment','total_discounts','total_discounts_presentment','paid','paid_presentment')
     keys2 = ('discount_codes',)
     orig_nvt = sumNvtItems(keys,orig_nvt,new_nvt)
     orig_nvt = mergeNvtItems(keys2,orig_nvt,new_nvt)
@@ -531,7 +538,7 @@ def addItemToNvtDict(nvt_dict,key,new_nvt):
         nvt_dict[key] = new_nvt
         return
     # order already exists. sum line items under this order and update dict with key of order_num
-    orig_nvt = mergedNvts(orig_nvt,new_nvt)
+    orig_nvt = mergeNvts(orig_nvt, new_nvt)
     nvt_dict[key] = orig_nvt
     return
 
@@ -548,8 +555,8 @@ def setOrderDetails(nvt,sct):
     # add OrderDetailTup items to order details dict of nvt.order_details
     name = space_before_dollar_sign(sct.line_item['name'])
     name = name.replace('</p>',' ')
-    unit_price = get_price_in_shopifyCommonTup(sct)
-    odt = OrderDetailTup(sct.created_at, sct.order_num, sct.sku, name, sct.quantity, unit_price, nvt.order_note, nvt.order_note_attributes)
+    unit_price,unit_price_presentment,currencyCode = get_price_in_shopifyCommonTup(sct)
+    odt = OrderDetailTup(sct.created_at, sct.order_num, sct.sku, name, sct.quantity, unit_price, unit_price_presentment, currencyCode, nvt.order_note, nvt.order_note_attributes)
     order_details = [odt]
     nvt = nvt._replace(order_details=order_details)
     return nvt
@@ -729,6 +736,37 @@ def getBadgeEntitledCntAndNames(nvt):
 
     return badge_names_orig,badge_entitled_cnt
 
+ISVALID_ORDER_NOTE_ATTRIBUTE = {}
+def isValid_OrderNoteAttribute(name):
+    if name in ISVALID_ORDER_NOTE_ATTRIBUTE:
+        return ISVALID_ORDER_NOTE_ATTRIBUTE[name]
+    toks = name.split('_')
+    if len(toks) < 3:
+        ISVALID_ORDER_NOTE_ATTRIBUTE[name] = False
+        return False
+    editAction = '_'.join(toks[:-2])
+    if editAction not in EDIT_ACTION_VALUES:
+        ISVALID_ORDER_NOTE_ATTRIBUTE[name] = False
+        return False
+    try:
+        order_num =int(toks[-2])
+    except:
+        ISVALID_ORDER_NOTE_ATTRIBUTE[name] = False
+        return False
+    if order_num < 1000 or order_num > 999999:
+        ISVALID_ORDER_NOTE_ATTRIBUTE[name] = False
+        return False
+    try:
+        seq_num = int(toks[-1])
+    except:
+        ISVALID_ORDER_NOTE_ATTRIBUTE[name] = False
+        return False
+    if seq_num < 1 or seq_num > 999:
+        ISVALID_ORDER_NOTE_ATTRIBUTE[name] = False
+        return False
+    ISVALID_ORDER_NOTE_ATTRIBUTE[name] = True
+    return True
+
 def normalizeOrderNoteAttributesSuffixes(order_note_attributes):
     # 12/19/2022. the trailing integer in the value of name in each order_note_attributes item can stop being in contiguous, ascending order within a company from 1 to N when an item is deleted.
     # there can be duplicate suffix integers as long as they are in different orders.
@@ -739,6 +777,8 @@ def normalizeOrderNoteAttributesSuffixes(order_note_attributes):
     orderSet = set()
     for ona_dict in order_note_attributes:
         name = ona_dict.get(NOTE_ATTRIBUTE_KEY())
+        if not isValid_OrderNoteAttribute(name):
+            continue
         toks = name.split('_')
         orderSet.add(toks[-2])
 
@@ -746,6 +786,8 @@ def normalizeOrderNoteAttributesSuffixes(order_note_attributes):
         ind = 0
         for ona_dict in order_note_attributes:
             name = ona_dict.get(NOTE_ATTRIBUTE_KEY())
+            if not isValid_OrderNoteAttribute(name):
+                continue
             toks = name.split('_')
             order2 = toks[-2]
             if order != order2:
@@ -766,14 +808,41 @@ def buildOrderIdToOrderNoteAttributesMap(order_id_to_order_num_map,order_note_at
 
     order_num_to_order_id_map = invertOrderIdToOrderNumMap(order_id_to_order_num_map)
     order_id_to_order_note_attributes_map = {}
+    ona_non_conforming = []
+    order_ids = set()
+    order_nums = set()
     for ona in order_note_attributes:
-        toks = ona[NOTE_ATTRIBUTE_KEY()].split('_')
+        name = ona[NOTE_ATTRIBUTE_KEY()]
+        if not isValid_OrderNoteAttribute(name):
+            # 4/1/2026. example that hits this special treatment is order_num 15264 in neaf_vendor_apply_edit function in precommit_sanity.py. I injected an order_note_attribute of
+            #           {'key': 'fake_test_key', 'value': 'fake_test_value'} into this order using the inject_test_custom_attribute_by_order_num function in debug_shopify_graphql.py.
+            #           this is a non-conforming order_note_attribute and this block used to implementy the retaining logic.
+            ona_non_conforming.append(ona)
+            continue
+        toks = name.split('_')
         order_num = toks[-2]
+        order_nums.add(order_num)
         order_id = order_num_to_order_id_map[order_num]
+        order_ids.add(order_id)
         ona_list = order_id_to_order_note_attributes_map.get(order_id,[])
         if not ona_list:
             order_id_to_order_note_attributes_map[order_id] = ona_list
         ona_list.append(ona)
+
+    if ona_non_conforming:
+        if len(order_ids) == 1:
+            order_id = next(iter(order_ids))
+            for ona_nc in ona_non_conforming:
+                # 4/1/2026. see comment above on how this non-conforming order_note_attribute was injected and now retained here.
+                order_id_to_order_note_attributes_map[order_id].append(ona_nc)
+        else:
+            # TODO 4/1/2026. I have no use case for this block. fix it if we ever find one in prod.
+            msg = (
+                f"\nWARNING in buildOrderIdToOrderNoteAttributesMap. The non-conforming order_note_attribute:{ona_non_conforming} cannot be unambiguously assigned to an order_num.\n"
+                f"        The following order_nums are possible candidates: {', '.join(list(order_nums))}. Unfortunately this non-conforming order_note_attribute will be deleted when\n"
+                f"        its order has its customAttributes updated. THIS IS A BUG. FIX IT.\n"
+            )
+            print(msg)
 
     return order_id_to_order_note_attributes_map,order_num_to_order_id_map
 
@@ -784,7 +853,6 @@ def buildOrderNumToOrderNoteAttributesMap(order_nums,order_num_to_order_id_map,o
         order_num_to_order_note_attributes_map[order_num] = order_id_to_order_note_attributes_map.get(order_id,[])
     return order_num_to_order_note_attributes_map
 def updateOrderNoteAttributes(order_num,order_id_to_order_num_map,order_note_attributes):
-    msg = ''
     normalizeOrderNoteAttributesSuffixes(order_note_attributes)
     order_id_to_order_note_attributes_map,order_num_to_order_id_map = buildOrderIdToOrderNoteAttributesMap(order_id_to_order_num_map,order_note_attributes)
 
@@ -792,19 +860,10 @@ def updateOrderNoteAttributes(order_num,order_id_to_order_num_map,order_note_att
 
     for order_num in order_nums:
         order_id = order_num_to_order_id_map[order_num]
-
-        ona = order_id_to_order_note_attributes_map.get(order_id,[])
-        variables = {"input": {"id": order_id, "customAttributes": ona }}
-        note_update = json.dumps({"query": MUTATE_CUSTOM_ATTRIBUTES,"variables": variables})
-        r_headers = {'Content-Type': 'application/json'}
-        req = f"https://{SHOP_NAME}.myshopify.com/admin/api/{ADMIN_API_VERSION}/graphql.json"
-
-        r = requests.post(url=req, data=note_update, auth=(Credentials().SHOPIFY_API_KEY_RW,Credentials().SHOPIFY_PASSWORD_RW),headers = r_headers)
-        if r.status_code != 200:
-            msg = 'Failed updating customAttributes in shopify. Response status_code:{0} is invalid. Expecting 200.\nContact your programmer. This is a difficult internet failure.'.format(r.status_code)
+        customAttributes = order_id_to_order_note_attributes_map.get(order_id,[])
+        success,msg = mutate_custom_attributes(order_num,order_id,customAttributes)
+        if not success:
             break
-        else:
-            print('\nSuccessfully updated customAttributes for order_num:{0} at\n{1}\nwith data\n{2}\n'.format(order_num,req,variables))
 
     order_num_to_order_note_attributes_map = buildOrderNumToOrderNoteAttributesMap(order_nums,order_num_to_order_id_map,order_id_to_order_note_attributes_map)
 
@@ -961,12 +1020,7 @@ def save_invoice(target_company,target_company_invoice,as_pdf,subdir=None):
     fname = fname.replace('__','_')
 
     subdir_path = os.path.dirname(fname)
-    if not os.path.exists(subdir_path):
-        try:
-            os.makedirs(subdir_path)
-        except Exception as ex:
-            msg = "Failure in save_invoice executing os.makedirs('{0}').\nException:\n{1}".format(subdir_path,ex)
-            return msg,subdir_path,fname
+    os.makedirs(subdir_path,exist_ok=True)
     with open(fname,'w',encoding="utf-8") as text_file:
         try:
             text_file.write(target_company_invoice)

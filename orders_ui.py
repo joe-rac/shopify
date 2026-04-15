@@ -6,8 +6,6 @@ from orders import Orders
 
 class OrdersUI(Frame):
     def __init__(self,master,argv):
-        # install win32api with
-        # pip install pywin32
 
         self.master = master
         self.width = self.master.winfo_screenwidth()
@@ -125,7 +123,8 @@ class OrdersUI(Frame):
         if self.orders.error:
             self.large_res.set(self.orders.error)
         else:
-            self.large_res.set(self.orders.show_dicts())
+            msg = f'Orders for {self.product_type} loaded between {self.orders.created_at_min} and {self.orders.created_at_max}.\n'
+            self.large_res.set(msg + self.orders.show_dicts())
         return
 
     def NumberOfAddressRows(self,val):

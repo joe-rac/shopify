@@ -8,6 +8,37 @@ The project is **launched from the command line**, but most workflows immediatel
 
 ---
 
+## 🐍 Python Setup (Required)
+
+This project requires Python 3.11.
+
+1. Download Python from:
+   https://www.python.org/downloads/
+
+2. Install Python:
+    - Choose Python 3.11.x
+    - IMPORTANT: Check the box "Add Python to PATH"
+    - Use default installation settings
+
+3. Verify installation (CMD or PowerShell):
+   python --version
+
+   You should see something like:
+   Python 3.11.x
+
+4. Expected install location:
+   C:\Users\<username>\AppData\Local\Programs\Python\Python311\
+
+---
+
+## 📦 Install Required Packages
+
+After installing Python, install the required packages listed in requirements.txt.
+
+Open requirements.txt and follow the instructions at the top of the file.
+
+---
+
 ## 🚀 Features
 
 - Pull and process Shopify orders via API

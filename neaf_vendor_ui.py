@@ -6,7 +6,7 @@ from utils_ui import STButton,STWidgetDropDown,STLargeResult,STWidget,STFrame
 from neaf_vendor_utils import VALID_EDIT_ACTIONS,BADGE_ACTION
 from neaf_vendor import NEAFVendor,save_invoice
 
-class NEAFManagementUI(Frame):
+class NEAFVendorUI(Frame):
 
     def __init__(self,master,argv):
         self.master = master
@@ -52,7 +52,7 @@ class NEAFManagementUI(Frame):
     def _create_widgets_small(self):
 
         vert_frame1 = STFrame(self,80,1)
-        STButton(vert_frame1,text='Save NEAF Management s/s to csv',command=self.SaveNEAFManagementSS,same_row=True)
+        STButton(vert_frame1, text='Save NEAF Management s/s to csv', command=self.SaveNEAFVendorSS, same_row=True)
         STButton(vert_frame1,text='Save NEAF Company/Badge s/s to csv',command=self.SaveNEAFCompanyBadgeSS,same_row=True)
         STButton(vert_frame1, text='SHOPIFY LOAD (must do this first)', command=self.ShopifyLoad, same_row=True)
         STButton(vert_frame1, text='Re-build all companies from prior SHOPIFY LOAD', command=self.BuildFromPriorShopifyLoad, same_row=True)
@@ -89,7 +89,7 @@ class NEAFManagementUI(Frame):
 
     def _create_widgets_medium(self):
         vert_frame1 = STFrame(self,100,1)
-        STButton(vert_frame1,text='Save NEAF Management s/s to csv',command=self.SaveNEAFManagementSS,same_row=True)
+        STButton(vert_frame1, text='Save NEAF Management s/s to csv', command=self.SaveNEAFVendorSS, same_row=True)
         STButton(vert_frame1,text='Save NEAF Company/Badge s/s to csv',command=self.SaveNEAFCompanyBadgeSS,same_row=True)
         STButton(vert_frame1, text='SHOPIFY LOAD (must do this first)', command=self.ShopifyLoad, same_row=True)
         STButton(vert_frame1, text='Re-build all companies from prior SHOPIFY LOAD', command=self.BuildFromPriorShopifyLoad, same_row=True)
@@ -129,7 +129,7 @@ class NEAFManagementUI(Frame):
 
     def _create_widgets_large(self):
         vert_frame1 = STFrame(self,100,1)
-        STButton(vert_frame1,text='Save NEAF Management s/s to csv',command=self.SaveNEAFManagementSS,same_row=True)
+        STButton(vert_frame1, text='Save NEAF Management s/s to csv', command=self.SaveNEAFVendorSS, same_row=True)
         STButton(vert_frame1,text='Save NEAF Company/Badge s/s to csv',command=self.SaveNEAFCompanyBadgeSS,same_row=True)
         STButton(vert_frame1, text='SHOPIFY LOAD (must do this first)', command=self.ShopifyLoad, same_row=True)
         STButton(vert_frame1, text='Re-build all companies from prior SHOPIFY LOAD', command=self.BuildFromPriorShopifyLoad, same_row=True)
@@ -178,10 +178,10 @@ class NEAFManagementUI(Frame):
             return False
         return True
 
-    def SaveNEAFManagementSS(self):
-        if not self.neafVendorIsValid('SaveNEAFManagementSS'):
+    def SaveNEAFVendorSS(self):
+        if not self.neafVendorIsValid('SaveNEAFVendorSS'):
             return
-        self.large_res.set(self.neafVendor.output_nvt_csv('neaf_management'))
+        self.large_res.set(self.neafVendor.output_nvt_csv('neaf_vendor'))
         return
 
     def SaveNEAFCompanyBadgeSS(self):
@@ -325,7 +325,7 @@ class NEAFManagementUI(Frame):
 
 def main(argv):
     top = Tk()
-    dpui = NEAFManagementUI(top,argv)
+    dpui = NEAFVendorUI(top, argv)
     dpui.mainloop()
     return
 

@@ -1,14 +1,20 @@
 from tkinter import Tk,Frame,Label
-from utils import NEAF_DAYS,DEFAULT_DAY,show_paths_and_files_dp,showError
+from consts import NEAF_DAYS,DEFAULT_DAY,NEAF_YEAR_DEFAULT,NEAF_YEAR_VALID
+from utils import show_paths_and_files_dp,showError,build_startup_parameters
+from pdf_utils import build_winners_pdf
 from utils_ui import STButton,STWidgetDropDown,STLargeResult,STFrame,STWidget
-from door_prize import DoorPrize,build_winners_pdf
+from door_prize import DoorPrize
 
 class DoorPrizeUI(Frame):
-    def __init__(self,master):
+    def __init__(self,master,argv):
         self.master = master
         self.next_row = 1
-        self.neaf_day = DEFAULT_DAY
+        self.neaf_year = NEAF_YEAR_DEFAULT
+        self.neaf_day_of_week = DEFAULT_DAY
         self.dp = None
+
+        self.argv = argv
+        self.spt = build_startup_parameters(self.argv)
 
         master.title('Door Prize')
         master.geometry('1330x635')
@@ -26,9 +32,10 @@ class DoorPrizeUI(Frame):
         STButton(vert_frame1, text='Load Data (must do this first)', command=self.ConstantContactAndShopifyLoad, same_row=True)
         STButton(vert_frame1,text='Pick Winner',command=self.PickWinner,same_row=True)
         STButton(vert_frame1,text='Build Winners PDF',command=self.BuildWinnersPdf,same_row=True)
+        STWidgetDropDown(vert_frame1,'Choose NEAF Year: %4s', NEAF_YEAR_VALID, default_value=NEAF_YEAR_DEFAULT, command=self.ChooseNEAFYear, same_row=True)
         vert_frame2 = STFrame(self,100,1)
         STButton(vert_frame2,text='Show all door prize data',command=self.ShowData,same_row=True)
-        STWidgetDropDown(vert_frame2,'Choose override NEAF Day: %8s',NEAF_DAYS,default_value=DEFAULT_DAY,command=self.ChooseNEAFDay,same_row=True)
+        STWidgetDropDown(vert_frame2,'Choose override NEAF Day: %8s', NEAF_DAYS, default_value=DEFAULT_DAY, command=self.ChooseNEAFDayOfWeek, same_row=True)
         STWidgetDropDown(vert_frame2,'Verbose: %3s', ('True','False'), default_value='False', command=self.Verbose, same_row=True)
         STButton(vert_frame2,text='Hints',command=self.Hints,same_row=True)
         STButton(vert_frame2,text='Show Paths and Files',command=self.ShowPathsAndFiles,same_row=True)
@@ -57,10 +64,10 @@ class DoorPrizeUI(Frame):
     def BuildWinnersPdf(self):
         if not self.doorPrizeObjectLoaded('BuildWinnersPdf'):
             return
-        self.small_res.set(build_winners_pdf(self.dp.dpSrc.winner))
+        self.small_res.set(build_winners_pdf(self.dp.dpSrc.winner,self.dp.neaf_year,self.dp.neaf_day_of_week))
         return
     def ConstantContactAndShopifyLoad(self):
-        self.dp = DoorPrize(override_day=self.neaf_day,verbose=self.verbose)
+        self.dp = DoorPrize(neaf_year=self.neaf_year,override_day=self.neaf_day_of_week, verbose=self.verbose)
         if self.dp.error:
             self.large_res.set(showError(self.dp.error) + '\n' + self.dp.msg)
             return
@@ -72,9 +79,12 @@ class DoorPrizeUI(Frame):
             return
         self.large_res.clear()
         self.large_res.set(self.dp.show_dicts())
-        return  
-    def ChooseNEAFDay(self,val):
-        self.neaf_day = val
+        return
+    def ChooseNEAFYear(self,val):
+        self.neaf_year = val
+        return
+    def ChooseNEAFDayOfWeek(self, val):
+        self.neaf_day_of_week = val
         return
     def Verbose(self, val):
         if val == 'True':
@@ -89,7 +99,10 @@ class DoorPrizeUI(Frame):
         self.large_res.set(self.dp.show_hints_dp())
         return    
     def ShowPathsAndFiles(self):
-        self.small_res.set(show_paths_and_files_dp())
+        if not self.dp:
+            self.small_res.set('No door prize data loaded. Nothing to show.')
+        else:
+            self.small_res.set(show_paths_and_files_dp(self.dp.neaf_year,self.dp.neaf_day_of_week))
         return
     def GetRandomIndex(self):
         if not self.doorPrizeObjectLoaded('GetRandomIndex'):
@@ -108,9 +121,9 @@ class DoorPrizeUI(Frame):
         return
 
         
-def main():
+def main(argv):
     top = Tk()
-    dpui = DoorPrizeUI(top)
+    dpui = DoorPrizeUI(top,argv)
     dpui.mainloop()
     return
 

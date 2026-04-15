@@ -3,8 +3,8 @@ import pprint
 import requests
 import json
 # valid sku keys
-from consts import MEMBERSHIP,DONATION,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAIC_ATTEND,RAD,HSP,HSP_RAFFLE,RLS,SSP,DOOR_PRIZE,MERCH,NEAF_VENDOR,USE_GRAPHQL,ADMIN,ALL
-from consts import SHOP_NAME,ADMIN_API_VERSION
+from consts import MEMBERSHIP,DONATION,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAIC_ATTEND,RAD,HSP,HSP_RAFFLE,RLS,SSP,DOOR_PRIZE,MERCH,NEAF_VENDOR,ADMIN,ALL
+from consts import SHOP_NAME,ADMIN_API_VERSION,NEAF_YEAR_DEFAULT
 from credentials import Credentials
 from orders import AccessOrders,Orders
 from utils import remove_unicode
@@ -31,10 +31,7 @@ refund_examples = [
     ('2/20/2019','2/21/2019',7618),    # QHYCCD. refunded $396, full order refund of booth.
 ]
 
-def accesshopify_by_date_range_and_sku(ind=8,use_graphlql=True):
-
-    orig_use_graphql = USE_GRAPHQL[0]
-    USE_GRAPHQL[0] = use_graphlql
+def accesshopify_by_date_range_and_sku(ind=8,):
 
     # 1/2/2025. this block returns 7 orders
     order_to_debug = None
@@ -48,15 +45,9 @@ def accesshopify_by_date_range_and_sku(ind=8,use_graphlql=True):
     # created_at_min = None  # '2019-04-29'
     # created_at_max = None  # '2019-04-29'
 
-    if USE_GRAPHQL[0]:
-        created_at_min = None
-        created_at_max = None
-        order_to_debug = refund_examples[ind][2]
-    else:
-        created_at_min = refund_examples[ind][0]
-        created_at_max = refund_examples[ind][1]
-        order_to_debug = refund_examples[ind][2]
-
+    created_at_min = None
+    created_at_max = None
+    order_to_debug = refund_examples[ind][2]
 
     # this block for Thomas Simstad, New Mexico Skies high priced order for $2000 of neaf_vendor_sponsor_live_steam
     # created_at_min = None # '2025-01-31'
@@ -64,7 +55,7 @@ def accesshopify_by_date_range_and_sku(ind=8,use_graphlql=True):
     # order_to_debug = 15436 # 15404
 
     # bought raffle ticket with swipper and need to get phone number off timeline
-    created_at_min = None
+    created_at_min = '2025-01-01'
     created_at_max = None
     #order_to_debug = '13167' # '13136' # '13167'
 
@@ -73,7 +64,7 @@ def accesshopify_by_date_range_and_sku(ind=8,use_graphlql=True):
     # 15478, Frank      has address2 Jackson, NJ old but Pomona with 2C in address2 in new
     # 15334, Sarah has blank for address2 and phone_num but MISSING for both in new (REPAIRED)
     # 15512, funny looking X in address.
-    order_to_debug = '15512'
+    # order_to_debug = '15512'
 
     # this block loads 22 orders from #15397 to #15418. its good example to test processing of many orders in single query.
     # created_at_min = '2025-01-31'
@@ -81,76 +72,89 @@ def accesshopify_by_date_range_and_sku(ind=8,use_graphlql=True):
     # order_to_debug = None
     # product_type = ALL
 
+    # 1/31/2026. this block used to test new donation field of Donor Name(s) in custom attribute. #17426 has Name(s) of Donor: Chaim and Rivka Shmuelowitz
+    created_at_min = '2025-01-01'
+    created_at_max = '2026-02-01'
+    product_type = DONATION
+    order_to_debug = None
+
     verbose = False
     orders = Orders(product_type,order_to_debug=order_to_debug,verbose=verbose)
     if orders.error:
         print(orders.error)
-        USE_GRAPHQL[0] = orig_use_graphql
         return
     orders.shopifyLoad(created_at_min=created_at_min,created_at_max=created_at_max)
 
     msg = orders.error if orders.error else orders.show_dicts()
     print(msg)
+    print(orders.dump_to_csv())
 
     #accessOrders = AccessOrders( sku_key,created_at_min,created_at_max=None, order_to_debug, verbose)
-    USE_GRAPHQL[0] = orig_use_graphql
 
     return
 
-#accesshopify_by_date_range_and_sku()
-
-def neafvendors_from_orders(ind=12,use_graphql=True):
-
-    orig_use_graphql = USE_GRAPHQL[0]
-    USE_GRAPHQL[0] = use_graphql
+def neafvendor_invoice_and_csv_from_orders(ind=12):
 
     from neaf_vendor import NEAFVendor
     neaf_year = '' # '2024'
     verbose = False
 
-    if USE_GRAPHQL[0]:
-        created_at_min = None
-        created_at_max = None
-        order_to_debug = refund_examples[ind][2]
-    else:
-        pass
-        created_at_min = None
-        created_at_max = None
-        #created_at_min = refund_examples[ind][0]
-        #created_at_max = refund_examples[ind][1]
-        #order_to_debug = refund_examples[ind][2]
+    created_at_min = None
+    created_at_max = None
+    order_to_debug = refund_examples[ind][2]
 
     # missing oberwerk donation value on s/s.
     # created_at_min = '2019-04-29'
     # created_at_max = created_at_min
-    # TODO 2/18/2024. supporting a single order_to_debug works fine for Oberwerk since they only did one order. That won't work for other vendors.
-    #                 support multiple orders for single vendor like for Explore Scientific with
-    #                 order_to_debug = '13717|13712'
+    # XXX 2/18/2024. supporting a single order_to_debug works fine for Oberwerk since they only did one order. That won't work for other vendors.
+    #                support multiple orders for single vendor like for Explore Scientific with
+    #                order_to_debug = '13717|13712'
     # order_to_debug = '8948'
     # 12/16/2025. 17190|17193|17198|17206|17218 are 5 canceled orders for Joes half assed scope. working on bug fix to exclude them from further NEAF vendor processing.
-    order_to_debug = '17190|17193|17198|17206|17218'
+    #order_to_debug = '17190|17193|17198|17206|17218'
+    # 2/8/2026. Amateur Astronomers Association of Pittsburgh had 2 invoices in 2025, 15317|15705. They failed to merge into 1 company.
+
+    # 2/1/2026. 17367, Remote Observatory. original order had 2 early bird premium. 1 refunded but 2 still showing on s/s and invoice.
+    #           17371|17374, Takahashi. refund 2 standard booths in 17371, buy 2 premium in 17374
+
+    order_to_debug = '17367'
+    #order_to_debug = '17371|17374'
+    #order_to_debug = '15317'
+    #order_to_debug = '15317|15705' # Amateur Astronomers Assoc. of Pittsburgh
+    #order_to_debug = '13443|13442|13441|13417'
+    #order_to_debug = '15175|15400' # bob's knobs
+    #order_to_debug = '15161|15376|16155' # "The Interstellar Collection, LLC" and "Brett Cohen" company names should be combined
+    # for 17712 original order of neaf_vendor_booth_premium_from_standard_early_bird but before "My Company Name" added. I editted email from hqu@spectrumoi.com to hincequ@gmail.com.
+    # combine with 17309 for 'Spectrum Optical Instruments'
+    order_to_debug = '17712|17309'
+    # #17377 of 'Khorovsky ent.inc dba Woodland hills camera', 2 premium booths. split into 2 companies with #17728, '10 Micron', neaf_vendor_booth_extra_ss_row
+    #order_to_debug = '17377|17728'
+    # #17376 of astronomics, 3 premium, 1 standard. split into 3 companies with #17729, Sky Rover and #17724 Astro-Tech, neaf_vendor_booth_extra_ss_row
+    #order_to_debug = '17729|17376|17724'
+
+    #order_to_debug = '17376' # 3/13/2026. has shitty extra badge name parsing where I confuse ',' and '/n' delimeters. repair.
+    #order_to_debug = '13712|13717|14138' # 3/17/2026. I deleted block in NEAFVendor.get_nv_collections about hack for 'Explore Scientific' vs. 'Explore Scientific LLC'.
+    #                                      I confirm with this test that block not needed and 'Explore Scientific LLC' is chosen.
+    order_to_debug = '17729|17376|17724|17712|17309|17377|17728' # 3/13/2026. extra ss row and standard to premium upgrade. all effect total_adj_booth_qty.
 
     nv = NEAFVendor(neaf_year,created_at_min,created_at_max,order_to_debug,verbose)
     nv.shopifyLoad()
     if nv.error:
         print(nv.error)
     else:
-        print(nv.output_nvt_csv('neaf_management'))
+        print(nv.output_nvt_csv('neaf_vendor'))
         #company_key = 'Australis'
         if not nv.nv_collections.vendor_invoices:
             invoice = f'nv.nv_collections.vendor_invoices is {nv.nv_collections.vendor_invoices}. No invoices created for order_to_debug:{order_to_debug}.'
         else:
-            invoice = next(iter(nv.nv_collections.vendor_invoices.values()))
-        print(invoice)
-
-    USE_GRAPHQL[0] = orig_use_graphql
+            delim = ''
+            for invoice in nv.nv_collections.vendor_invoices.values():
+                print(delim + invoice)
+                delim = '****************************************************************************************************************************************************\n'
 
     return
 
-neafvendors_from_orders()
-
-def neafvendor_load(neaf_year='2025',verbose=False, use_graphql=True):
-    USE_GRAPHQL[0] = use_graphql
+def neafvendor_load(neaf_year=NEAF_YEAR_DEFAULT,verbose=False):
     neafVendor = NEAFVendor(neaf_year=neaf_year, verbose=verbose)
     if neafVendor.error:
         print(neafVendor.error + '\n' + neafVendor.msg)
@@ -160,133 +164,23 @@ def neafvendor_load(neaf_year='2025',verbose=False, use_graphql=True):
         print(neafVendor.error)
     else:
         all_invoices = neafVendor.nv_collections.vendor_invoices
-
-    return
-#neafvendor_load()
-
-def create_neaic_report():
-
-    verbose = False
-    product_type = NEAIC_ATTEND
-    created_at_min = '2024-01-01'
-    created_at_max = None
-    order_to_debug = None
-
-    orders = Orders(product_type, verbose=verbose)
-    msg, order_num = orders.get_latest_neaic_order_number()
-    orders.shopifyLoad(created_at_min=created_at_min, created_at_max=created_at_max, order_to_debug=order_to_debug)
-    msg = orders.error if orders.error else orders.neaic_attendee_dump_to_csv(incremental_since_last_run=True)
-
-    print(msg)
+        i = 0
+        print('\n**********   Display front of each element in neafVendor.nv_collections.vendor_invoices:   **********\n')
+        for company,invoice in all_invoices.items():
+            i += 1
+            invoice_front = invoice.replace("\n",'')[118:264]
+            msg = f'{i:>3}: {company[:40]:>40} -- {invoice_front}'
+            print(msg)
 
     return
 
-def rester_sample_read():
+def main():
 
-    # some sample shopify queries other than orders, not that interesting.
-
-    '''
-    response = requests.get( 'https://%s.myshopify.com/admin/products/count.json' % SHOP_NAME, auth=(Credentials().SHOPIFY_API_KEY,Credentials().SHOPIFY_PASSWORD))
-    print response.text
-    response = requests.get( 'https://%s.myshopify.com/admin/orders/count.json' % SHOP_NAME, auth=(Credentials().SHOPIFY_API_KEY,Credentials().SHOPIFY_PASSWORD))
-    if response.status_code != 200:
-        print 'Failure, response.status_code is {0}'.format(response.status_code)
-    print response.text
-    # max response size is 250. have to read pages after that.
-    response = requests.get( 'https://%s.myshopify.com/admin/orders.json?since_id=3010' % SHOP_NAME,auth=(Credentials().SHOPIFY_API_KEY,Credentials().SHOPIFY_PASSWORD))
-    text1 = response.text
-    print response.status_code
-    req = 'https://%s.myshopify.com/admin/orders.json?updated_at_min=2015-02-01 00:00:01 EDT -04:00' % SHOP_NAME
-    response = requests.get(req,auth=(Credentials().SHOPIFY_API_KEY,Credentials().SHOPIFY_PASSWORD))
-    print response.status_code
-    text2 = response.text  '''
-
-    # look at doc C:\Users\joe1\rac\ecommerce\docs\shopify_api_json_schema.txt on 76 Lime Kiln computer for details on
-    # schema for orders .  small modification to build_door_prize_dict_from_shopify and get_doorPrizeTup_dict should
-    # support processing of NEAF vendor orders.
-
-    #reqstr = 'https://%s.myshopify.com/admin/orders.json?' +\
-    #    'fields=created_at,id,name,customer,line_items&limit=250&page=1&created_at_min=2014-10-01 00:01'
+    # 3/2/2024. the 3 functions in this block has been tested as of this date
+    neafvendor_invoice_and_csv_from_orders()
+    #neafvendor_load()
+    #accesshopify_by_date_range_and_sku()
 
     return
-
-#rester_sample_read()
-
-def rester_note_attributes_update_1():
-
-    order_id = 1980097560658 # test order #9130 for Joe's dumb ass scopes
-    #order_id = 1974718529618 # order #9129 for photonic cleaning
-    order_id = 2144708198482 # order #9481 for nimax with partial refund
-    order_id = 2144844677202 # order #9483 also for nimax, partial refunds
-    order_id = 5060039639122 # order 13167 for Donald A Kaplan buying membership at club table for NEAF 2023 using POS
-    order_id = 6208463405138 # order 15568 for Celestron with NEAF Vendor Payment of $1450 with bad  'note_attributes': [{'name': '1 - NEAF Vendor Payment', 'value': ''}]
-    #order_id = '6234913341522' # order 15713 for NEAIC with no note_attribute items of []
-
-    #reqstr = 'https://{0}.myshopify.com/admin/orders/{1}.json'
-    reqstr = 'https://{0}.myshopify.com/admin/api/{1}/orders/{2}.json'
-    req = reqstr.format(SHOP_NAME,ADMIN_API_VERSION,order_id)
-    response = requests.get(req,auth=(Credentials().SHOPIFY_API_KEY_RW,Credentials().SHOPIFY_PASSWORD_RW))
-    print((response.status_code))
-    #print response.text
-    rd =  json.loads(response.text)['order']
-    rd = remove_unicode(rd)
-    # 12/18/2019. msg is full dump of orders. very useful for seeing what's available for note_attributes in function shopify_https_request
-    msg = pprint.pformat(rd,width=200)
-    print(msg)
-    note = rd['note']
-    print(note)
-    return
-
-    #note_dict = {"order":{"id":1980097560658,"note":"change to new note through python"}}
-
-    note_dict = {"order":{"id":order_id,"note_attributes": [{"name":DELETE_BADGE+'_1',"value":"Blah Blah"},
-                                                            {"name":NEW_BADGE+'_2',"value":"Mordechai Levine"},
-                                                            {"name":DELETE_BADGE+'_3',"value":"joey jeff"},
-                                                            ]}}
-    #note_dict = {unicode('order'):{unicode('id'):1980097560658,unicode('note'):unicode('change to new note through python')}}
-    #note_dict = {"id":1980097560658,"note":"change to new note through python"}
-
-    note_update = json.dumps(note_dict)
-    #note_update = unicode(note_update)
-    r_headers = {'Content-Type': 'application/json'}
-    r = requests.put(url=req, data=note_update, auth=(Credentials().SHOPIFY_API_KEY_RW,Credentials().SHOPIFY_PASSWORD_RW),headers = r_headers)
-
-    return
-
-#rester_note_attributes_update_1()
-
-def rester_note_attributes_update_2():
-
-    # 12/19/2022. this function used to change note_attributes from
-
-    # [{NOTE_ATTRIBUTE_KEY(): 'Badge_Name_1', 'value': 'bob smith'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_2', 'value': 'john dow'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_3', 'value': 'Billy Bob'},
-    # {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_4', 'value': 'Richard Nixon'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_5', 'value': 'Spiro Agnew'}]
-
-    # to
-
-    # [{NOTE_ATTRIBUTE_KEY(): 'Badge_Name_9426', 'value': 'bob smith'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_9426', 'value': 'john dow'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_9426', 'value': 'Billy Bob'},
-    # {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_9426', 'value': 'Richard Nixon'}, {NOTE_ATTRIBUTE_KEY(): 'Badge_Name_9426', 'value': 'Spiro Agnew'}]
-
-    order_id = 2129787781202
-    order_id = 6208463405138  # order 15568 for Celestron with NEAF Vendor Payment of $1450 with bad  'note_attributes': [{'name': '1 - NEAF Vendor Payment', 'value': ''}] changes to []
-
-    reqstr = 'https://{0}.myshopify.com/admin/api/{1}/orders/{2}.json'
-    req = reqstr.format(SHOP_NAME, ADMIN_API_VERSION, order_id)
-
-    note_dict = {"order": {"id": order_id, "note_attributes": [{"name": "Badge_Name_9426_1", "value": "bob smith"}, {"name": "Badge_Name_9426_2", "value": "john dow"},
-                                                               {"name": "Badge_Name_9426_3", "value": "Billy Bob"}, {"name": "Badge_Name_9426_4", "value": "Richard Nixon"},
-                                                               {"name": "Badge_Name_9426_5", "value": "Spiro Agnew"}]
-                           }}
-
-    note_dict = {"order": {"id": order_id, "note_attributes": []
-                           }}
-
-
-    note_update = json.dumps(note_dict)
-    r_headers = {'Content-Type': 'application/json'}
-    r = requests.put(url=req, data=note_update, auth=(Credentials().SHOPIFY_API_KEY_RW, Credentials().SHOPIFY_PASSWORD_RW), headers=r_headers)
-
-    return
-
-
+main()
 

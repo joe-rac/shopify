@@ -10,34 +10,18 @@ import copy
 import requests
 import json
 import datetime
-import time
 import pprint
 # install with
 # pip install python-dateutil
 # use pip3 on mac
 from dateutil import parser
 import tracemalloc
-from consts import NEAF_YEAR_VALID,NEAF_YEAR_DEFAULT,USE_GRAPHQL,SKUS_TO_LOAD_DICT
-from consts import NEAF_YEAR_ALL,ALL,SHOP_NAME,RawOrdersTup
-from credentials import Credentials
-from utils import get_default_neaf_year,remove_unicode,NeafVendorTup,OrderTup,get_date,utc_for_midnight_local
+from consts import ALL,RawOrdersTup,SKUS_TO_LOAD_DICT
+from utils import NeafVendorTup,OrderTup,utc_for_midnight_local
+from date_filter_utils import initialize_neaf_year,initialize_created_at_min_and_max
 from graphql_queries import ORDER_DETAILS,ORDERS_BY_SKU_BETWEEN_DATES,ORDER_BY_NAME
-from graphql_utils import get_orders_cursor_items,get_url_and_headers
-from get_shopifycommontup_list import get_shopifyCommonTup_list
+from graphql_utils import get_orders_cursor_items,get_url_and_headers,edges_node_to_list
 from get_shopifycommontup_list_graphql import get_shopifyCommonTup_list_graphql
-
-def goodDateStr(dstr):
-    date_str = None
-    error_msg = ''
-    dstr = '' if not dstr else str(dstr)
-    if not dstr.strip():
-        dstr = 'BLANK'
-    try:
-        date_str =  parser.parse(dstr).strftime('%Y-%m-%d')
-        return date_str,error_msg
-    except ValueError:
-        error_msg = "Date of '{0}' is not valid.".format(dstr)
-        return date_str,error_msg
 
 def get_st_dict_stats(st_dict):
     keys = sorted(st_dict.keys())
@@ -59,9 +43,13 @@ def apply_discount(st_dict,order_num):
         return
 
     if isinstance(nvt,NeafVendorTup):
-        total_cost = nvt.total_cost
-        total_discounts = nvt.total_discounts
+        total_cost             = nvt.total_cost
+        total_cost_presentment = nvt.total_cost_presentment
+        total_discounts             = nvt.total_discounts
+        total_discounts_presentment = nvt.total_discounts_presentment
         discount_codes = nvt.discount_codes
+        paid_presentment = 0.0 if discount_codes in ('EDUCATION','CHECK') else total_cost_presentment - total_discounts_presentment
+        total_due_presentment = total_cost_presentment if discount_codes == 'CHECK' else None
     else:
         total_cost = nvt.total
         total_discounts = nvt.discount
@@ -70,7 +58,7 @@ def apply_discount(st_dict,order_num):
     paid = 0.0 if discount_codes in ('EDUCATION','CHECK') else total_cost - total_discounts
     total_due = total_cost if discount_codes == 'CHECK' else None
     if isinstance(nvt,NeafVendorTup):
-        nvt = nvt._replace(paid=paid,total_due=total_due)
+        nvt = nvt._replace(paid=paid,paid_presentment=paid_presentment,total_due=total_due,total_due_presentment=total_due_presentment)
     else:
         nvt = nvt._replace(paid=paid)
     st_dict[order_num] = nvt
@@ -85,71 +73,22 @@ class AccessShopify(object):
         self.neaf_year_raw = neaf_year.lower()
         self.order_to_debug = order_to_debug
 
-        if created_at_min:
-            if not get_date(created_at_min):
-                self.error = "created_at_min: '{0}' passed to AccessShopify.__init__ not in valid date form.".format(created_at_min)
-                return
-        if created_at_max:
-            if not get_date(created_at_max):
-                self.error = 'created_at_max:{0} passed to AccessShopify.__init__ not in valid date form.'.format(created_at_max)
-                return
-        if created_at_min and created_at_max and created_at_min > created_at_max:
-            msg = 'created_at_min:{0} and created_at_max:{1} passed to AccessShopify.__init__ are invalid. created_at_min must be less than or equal to created_at_max.'
-            self.error = msg.format(created_at_min,created_at_max)
-            return
-
-        if not neaf_year and (created_at_min and created_at_max):
-            # no need for neaf year if both min and max date exist.
-            pass
-        else:
-            neaf_year = str(neaf_year) if neaf_year else NEAF_YEAR_DEFAULT
-        nyr_default = get_default_neaf_year()
-        nyr = ''
-        if neaf_year.isdigit():
-            nyr = int(neaf_year)
-            if nyr < 2015 or nyr > nyr_default:
-                self.error = 'neaf_year:{0} is invalid. Must be from {1} to {2}.'.format(nyr,2015,nyr_default)
-        elif neaf_year and neaf_year not in NEAF_YEAR_VALID:
-            self.error = 'neaf_year of {0}. Must be one of {1} or blank.'.format(neaf_year,NEAF_YEAR_VALID)
+        self.neaf_year,self.error = initialize_neaf_year(created_at_min,created_at_max,neaf_year)
         if self.error:
             return
-        if neaf_year == NEAF_YEAR_ALL:
-            self.neaf_year = ''
+
+        if self.order_to_debug:
+
+            if created_at_min or created_at_max:
+                self.error = 'order_to_debug:{0}, created_at_min:{1} and created_at_max:{2} are incompatible. Either use order_to_debug or use created_at_min and created_at_max.'
+                self.error = self.error.format(self.order_to_debug,created_at_min,created_at_max)
+                return
+            self.created_at_min = None
+            self.created_at_max = None
+
         else:
-            self.neaf_year = nyr
 
-        if neaf_year and (created_at_min or created_at_max):
-            self.error = 'neaf_year:{0}, created_at_min:{1} and created_at_max:{2} are incompatible. Either use neaf_year or created_at_min/created_at_max.'.format(neaf_year,created_at_min,created_at_max)
-            return
-
-        if USE_GRAPHQL[0]:
-            if self.order_to_debug:
-                if created_at_min or created_at_max:
-                    self.error = 'order_to_debug:{0}, created_at_min:{1} and created_at_max:{2} are incompatible. Either use order_to_debug or use created_at_min and created_at_max.'
-                    self.error = self.error.format(self.order_to_debug,created_at_min,created_at_max)
-                    return
-                self.created_at_min = None
-                self.created_at_max = None
-
-        if not USE_GRAPHQL[0] or not self.order_to_debug:
-            if created_at_min:
-                self.created_at_min,self.error = goodDateStr(created_at_min)
-            else:
-                self.created_at_min = '2014-10-01' if neaf_year == NEAF_YEAR_ALL else '{0}-10-01'.format(self.neaf_year-1)
-            if created_at_max:
-                self.created_at_max,self.error = goodDateStr(created_at_max)
-            else:
-                if self.neaf_year:
-                    self.created_at_max = '{0}-06-01'.format(self.neaf_year)
-                else:
-                    now = datetime.datetime.now()
-                    self.created_at_max = '{0}-{1}'.format(now.year+1,now.strftime('%m-%d'))
-            today = datetime.datetime.now().strftime('%Y-%m-%d')
-            if self.created_at_max > today:
-                self.created_at_max = today
-
-            if self.created_at_min and self.created_at_max and self.created_at_min > self.created_at_max:
-                self.error = 'created_at_min:[0} and created_at_max:{1} are incompatible. created_at_min must be less than or equal to created_at_max.'
+            self.created_at_min,self.created_at_max,self.error = initialize_created_at_min_and_max(created_at_min, created_at_max, self.neaf_year)
             if self.error:
                 return
 
@@ -184,17 +123,9 @@ class AccessShopify(object):
         raise Exception(msg)
         return
 
-    def getRangeItems(self,orders):
-        # TODO 12/27/2024. delete this function when we have migrated to GraphQL
-        last_order = orders[0]
-        first_order = orders[-1]
-        first_key = first_order['name']
-        first_date = first_order['created_at'][0:10]
-        last_key = last_order['name']
-        last_date = last_order['created_at'][0:10]
-        return first_key,first_date,last_key,last_date
-
     def getRangeItemsGraphQL(self,orders):
+        if not orders:
+            return None,None,None,None
         last_order = orders[0]
         first_order = orders[-1]
         first_key = first_order['name']
@@ -236,111 +167,6 @@ class AccessShopify(object):
 
         return link
 
-    def shopifyOrdersFromHttps(self,limit=250):
-
-        # TODO 12/27/2024. delete this function when we have migrated to GraphQL
-        # 12/30/2022. populate self.rawOrdersTupList with raw shopify data from their webservice.
-
-        page = 0
-        total_raw_orders_count = 0
-        self.rawOrdersTupList.clear()
-
-        today = datetime.datetime.now().strftime('%Y-%m-%d')
-        if today == self.created_at_max:
-            # 4/9/2021. found weird behavior with created_at_max today. when running at 10PM only orders up to 7:45PM were picked up. see if this helps. maybe there's an issue
-            # wih UT that this might fix?
-            created_at_max = datetime.datetime.now().date() + datetime.timedelta(days=1)
-            created_at_max = created_at_max.strftime('%Y-%m-%d')
-        else:
-            created_at_max = self.created_at_max
-
-        orders_to_debug = self.order_to_debug.split('|') if self.order_to_debug else []
-        order_to_debug_str = ' order_to_debug:{0},'.format(self.order_to_debug) if self.order_to_debug else ''
-        msg = '\nIn shopifyOrdersFromHttps accessing orders at https://{0}.myshopify.com/admin/orders.json with limit={1},{2} created_at_min={3} 00:01, created_at_max={4} 23:59\n'
-        print(msg.format(SHOP_NAME,limit,order_to_debug_str,self.created_at_min,created_at_max))
-
-        while True:
-            page += 1
-            # 3/13/2019 TODO go here for documentation on options for order.json url. https://help.shopify.com/api/reference/order
-            # 12/18/2012. see comment of same date in main() for full dump of entire order. this is only a small part of it.
-
-            if page == 1:
-
-                reqstr = 'https://{0}.myshopify.com/admin/orders.json?' +\
-                    'fields=created_at,note,note_attributes,total_discounts,discount_codes,id,name,customer,billing_address,refunds,line_items&limit={1}'+\
-                    '&created_at_min={2} 00:01&created_at_max={3} 23:59'  # 3/31/2017. added total_discounts and discount_codes
-                reqstr = reqstr.format(SHOP_NAME,limit,self.created_at_min,created_at_max)
-            else:
-                reqstr = link
-
-            try:
-                response = requests.get(reqstr,auth=(Credentials().SHOPIFY_API_KEY_2,Credentials().SHOPIFY_PASSWORD_2))
-            except Exception as ex:
-                self.error = 'Exception running\n{0}\nof\n{1}\nWe are screwed.'.format(reqstr,ex)
-                return
-            if response.status_code != 200:
-                msg = 'Failure getting Shopify data from internet while procesing URL\n'+'{0}\nstatus_code was {1}. Should be 200 if everything was working. Say a prayer and try again.'
-                self.error = msg.format(reqstr,response.status_code)
-                return None,None
-
-            link = self._getPaginationItems(page,reqstr,response)
-            if self.error:
-                return
-
-            res_text = response.text
-            #res_text = res_text.encode('ascii','ignore')
-            rd =  json.loads(res_text)
-            orders = list(rd.values())[0]
-            if not len(orders):
-                # we have processed last page, we are done
-                break
-
-            if orders_to_debug:
-                # 11/25/2025. discard orders not in order_to_debug
-                for o in orders[:]:
-                    if o['name'][1:] not in orders_to_debug:
-                        orders.remove(o)
-
-            #orders = remove_unicode(orders)
-            raw_orders_count = len(orders)
-            if not raw_orders_count:
-                continue
-
-            total_raw_orders_count += raw_orders_count
-            first_key,first_date,last_key,last_date = self.getRangeItems(orders)
-            range_msg = 'from {0}/{1} to {2}/{3}'.format(first_key,first_date,last_key,last_date)
-            self.last_page_comment = '{0} page {1}, {2} orders {3}. Tot. order cnt.:{4}.'
-            self.last_page_comment = self.last_page_comment.format(reqstr[:reqstr.index('?')],page,raw_orders_count,range_msg,total_raw_orders_count)
-            self.print_and_save(self.last_page_comment,always_print=True,verbose=True)
-
-            rawOrdersTup = RawOrdersTup(page,raw_orders_count,orders)
-            self.rawOrdersTupList.append(rawOrdersTup)
-
-            if not link:
-                # we've reached the end of data. we're done.
-                break
-
-        print('\nmemory usage at exit from AccessShopify.shopifyOrdersFromHttps after raw shopify data is loaded : {0}\n'.format(tracemalloc.get_traced_memory()[0]))
-        return
-
-    def edges_node_to_list(self,val):
-        if not isinstance(val,dict):
-            return val
-        edges_list = val.get('edges')
-        pageInfo = val.get('pageInfo')
-        if pageInfo is None and isinstance(edges_list,list) and len(edges_list) == 0:
-            # 2/13/2025. this block for refund that's missing refundLineItems but has refund against entire order. Example is #15317 with totalRefundedSet of $306.
-            return []
-        cleanup_val =  bool(len(val) == 2 and edges_list and pageInfo) or bool(len(val) == 1 and edges_list)
-        if not cleanup_val:
-            return val
-        if not isinstance(edges_list,list) or not edges_list or not isinstance(edges_list[0],dict) or len(edges_list[0]) != 1 or not edges_list[0].get('node') :
-            return val
-        new_val = []
-        for edge in edges_list:
-            new_val.append(edge['node'])
-        return new_val
-
     def getOrdersFromGraphqlRes(self, res):
 
         # 1/1/2025. slightly improve the data structures in res but don't adjust the basic graphql schema.
@@ -350,15 +176,15 @@ class AccessShopify(object):
             self.error = "res.get('data',{}).get('orders',{}) returned no orders. Expecting a dict of orders to be returned by GraphQL request ORDERS_BY_SKU_BETWEEN_DATES."
             return
 
-        new_orders = self.edges_node_to_list(orders)
+        new_orders = edges_node_to_list(orders)
 
         for new_order in new_orders:
-            new_order['lineItems'] = self.edges_node_to_list(new_order['lineItems'])
-            new_order['events'] = self.edges_node_to_list(new_order['events'])
+            new_order['lineItems'] = edges_node_to_list(new_order['lineItems'])
+            new_order['events'] = edges_node_to_list(new_order['events'])
             refunds = new_order['refunds']
             if refunds:
                 for refund in refunds:
-                    refund['refundLineItems'] = self.edges_node_to_list(refund.get('refundLineItems',[]))
+                    refund['refundLineItems'] = edges_node_to_list(refund.get('refundLineItems',[]))
 
         # 2/14/2025. run this print in console to see orders in their cleaned up format.
         # print(pprint.pformat(new_orders,width=250))
@@ -514,9 +340,9 @@ class AccessShopify(object):
         self.excludedCovidSkuOrdersDict.clear()
         i = 0
 
-        # 2/2/2023. debug controls the print of debug info in get_shopifyCommonTup_list and get_shopifyCommonTup_list_graphql
+        # 2/2/2023. debug controls the print of debug info in get_shopifyCommonTup_list_graphql
         debug = False
-        # 2/12/2025. lineItemCount is count of number of line items that are turned into ShopifyCommonTup objects in get_shopifyCommonTup_list and get_shopifyCommonTup_list_graphql.
+        # 2/12/2025. lineItemCount is count of number of line items that are turned into ShopifyCommonTup objects in get_shopifyCommonTup_list_graphql.
         lineItemCount = 0
 
         for rawOrdersTup in self.rawOrdersTupList:
@@ -526,24 +352,16 @@ class AccessShopify(object):
             orders = rawOrdersTup.orders
 
             sctList = []
-            if USE_GRAPHQL[0]:
-                # 1/2/2025. get_shopifyCommonTup_list where we convert self.rawOrdersTupList which is in shopify form straight from the webservice to list of ShopifyCommonTup
-                #           objects in sctList which is close to final form and
-                #           has been reduced in size by filtering requested skus specified by sku_key.
-                #           self.order_to_debug exist then sctList is further reduced to just lineitems in that order.
-                #           The critical function that converts ShopifyCommonTup to final form specific to each class is self.append_to_shopifyTup_dict which after this function.
-                #           To dump brief summary of every line item included ShopifyCommonTup pass in debug as True.
-                error,found_order_to_debug,lineItemCount = get_shopifyCommonTup_list_graphql(orders,self.neaf_year_raw,self.sku_key,self.order_to_debug,sctList,self.refundNotes,
-                                                                                     self.note_attributes_Notes,self.excludedCovidSkuOrdersDict,debug,lineItemCount,self.verbose)
-            else:
-                # 12/30/2022. get_shopifyCommonTup_list where we convert self.rawOrdersTupList which is in shopify form straight from the webservice to list of ShopifyCommonTup
-                #             objects in sctList which is close to final form and
-                #             has been reduced in size by filtering requested skus specified by sku_key.
-                #             self.order_to_debug exist then sctList is further reduced to just lineitems in that order.
-                #             The critical function that converts ShopifyCommonTup to final form specific to each class is self.append_to_shopifyTup_dict which after this function.
-                #             To dump brief summary of every line item included ShopifyCommonTup pass in debug as True.
-                error,found_order_to_debug,lineItemCount = get_shopifyCommonTup_list(orders,self.neaf_year_raw,self.sku_key,self.order_to_debug,self.created_at_max,sctList,self.refundNotes,
-                                                                                     self.note_attributes_Notes,self.excludedCovidSkuOrdersDict,debug,lineItemCount,self.verbose)
+
+            # 1/2/2025. get_shopifyCommonTup_list_graphql where we convert self.rawOrdersTupList which is in shopify form straight from the webservice to list of ShopifyCommonTup
+            #           objects in sctList which is close to final form and
+            #           has been reduced in size by filtering requested skus specified by sku_key.
+            #           self.order_to_debug exist then sctList is further reduced to just lineitems in that order.
+            #           The critical function that converts ShopifyCommonTup to final form specific to each class is self.append_to_shopifyTup_dict which after this function.
+            #           To dump brief summary of every line item included ShopifyCommonTup pass in debug as True.
+            error,found_order_to_debug,lineItemCount = get_shopifyCommonTup_list_graphql(orders,self.neaf_year_raw,self.sku_key,self.order_to_debug,sctList,self.refundNotes,
+                                                                                 self.note_attributes_Notes,self.excludedCovidSkuOrdersDict,debug,lineItemCount,self.verbose)
+
             if error:
                 self.error = error
                 return None,None

@@ -6,30 +6,32 @@ Created on Sat Mar 07 17:58:17 2015
 # utilities used by door_prize and search_and_confirm modules
 
 import os
+import re
+import unicodedata
 import csv
 # 1/9/2025. install with
 #           pip install pytz
 import pytz
 import datetime
+import inspect
+# install with
+# pip install python-dateutil
+# use pip3 on mac
+from dateutil import parser
+from datetime import date
 from collections import namedtuple
-from functools import lru_cache
 
-from consts import ERROR,MISSING,USE_GRAPHQL,N_A
-
+import consts
+from consts import ERROR,MISSING,N_A,CURRENCY_SYMBOL_FROM_CODE
 eastern_zone = pytz.timezone("US/Eastern")
 utc_format = "%Y-%m-%dT%H:%M:%SZ"
 
 def NOTE_ATTRIBUTE_KEY():
-    return 'key' if USE_GRAPHQL[0] else 'name'
+    return 'key'
 
-def PROPERTIES_KEY():
-    return 'customAttributes' if USE_GRAPHQL[0] else 'properties'
+def CUSTOM_ATTRIBUTES_KEY():
+    return 'customAttributes'
 
-# OVERRIDE_DAY = [None] # only used for testing. leave as None in production.
-DEFAULT_DAY = 'default' # if its really saturday or sunday default day will be the real day. if its not saturday or sunday force user to choose one of them for testing.
-SATURDAY = 'Saturday'
-SUNDAY = 'Sunday'
-NEAF_DAYS = [DEFAULT_DAY,SATURDAY,SUNDAY]
 DOOR_PRIZE_HEADER = ['order-number','order_id','order-created_at','order-billing_address-name','order-billing_address-phone', 'order-email','order-line_items-sku',
                      'order-line_items-quantity','CONFIRM_NOTE']
 # CONFIRM_NOTE is used for search_and_confirm. if someone is searched for and then confirmed CONFIRM_NOTE will say
@@ -38,25 +40,26 @@ XPORTER_FIELDS = 'order_num order_id created_at name phone_num email sku quantit
 DoorPrizeTup = namedtuple('DoorPrizeTup', XPORTER_FIELDS)
 # any changes to NEAF_VENDOR_FIELDS need change to append_to_neafVendorRawTup_dict func in access_shopify.py .
 # error is something like contradictory company name in default_address and properties.
-ORDER_DETAIL_FIELDS = 'created_at order_num sku name quantity unit_price order_note order_note_attributes'
+ORDER_DETAIL_FIELDS = 'created_at order_num sku name quantity unit_price unit_price_presentment currencyCode order_note order_note_attributes'
 OrderDetailTup = namedtuple('OrderDetailTup', ORDER_DETAIL_FIELDS)
 ORDER_PROPERTIES_FIELDS = 'order_num names address1 address2 address3 phone_num email'
 OrderPropertiesTup = namedtuple('OrderPropertiesTup', ORDER_PROPERTIES_FIELDS)
 
-# TODO when changing NeafVendorTup make sure adjustments made to keys_to_be_summed and keys_to_be_merged in mergedNvts in neaf_vendor_utils.py .
+# XXX when changing NeafVendorTup make sure adjustments made to keys_to_be_summed and keys_to_be_merged in mergedNvts in neaf_vendor_utils.py .
 
-# TODO 3/25/2023. Keep NEAF_VENDOR_FIELDS usage here in sync with usage in NeafVendorTup in neaf_vendor.py near line 118.
-#  NEAF s/s fields runs from company to error
+# XXX 3/25/2023. Keep NEAF_VENDOR_FIELDS usage here in sync with usage in NeafVendorTup in neaf_vendor.py near line 118.
+#                NEAF s/s fields runs from company to error
 
 # 12/27/2022. Bizarrely order_num is in there twice, 2nd time its orderNumber. that's the simplest way of getting it into the s/s in the current framework where s/s fields run
 #             from company to error in NeafVendorTup schema.
 NEAF_VENDOR_FIELDS = 'order_num created_at sku quantity CONFIRM_NOTE '\
     'company_from_property company_from_attribute name_from_attribute '\
     'company last_order_date orderNumber name address1 address2 address3 phone_num cellno '\
-    'email booth_st_qty booth_st booth_prem_qty booth_prem extra_tables_qty '\
-    'extra_tables extra_chairs_qty extra_chairs elec carpet additional_badges_qty additional_badges wifi shipping_box '\
-    'shipping_pallet sponsorship donation donation_order_from_attribute exclude_order_from_attribute declined_neaf_2023 prize_donation prize_donation_value total_cost paid '\
-    'total_due check_number total_discounts discount_codes booth_comments sales_comments order_note error '\
+    'email booth_st_qty booth_st booth_prem_qty booth_prem upgrade_st_to_prem_qty upgrade_st_to_prem total_adj_booth_qty get_booths_from '\
+    'extra_tables_qty extra_tables extra_chairs_qty extra_chairs elec carpet additional_badges_qty additional_badges wifi shipping_box '\
+    'shipping_pallet sponsorship donation donation_order_from_attribute exclude_order_from_attribute declined_neaf_2023 prize_donation prize_donation_value '\
+    'currencyCode total_cost  paid total_due check_number total_discounts  discount_codes booth_comments sales_comments order_note error '\
+    'total_cost_presentment paid_presentment total_due_presentment total_discounts_presentment '\
     'shipping_box_qty shipping_pallet_qty order_num_to_donation_map order_note_attributes order_id refund_note refund_created_at '\
     'name_on_badge badge1_name badge2_name extra_badge_names badge_names_orig badge_entitled_cnt badge_names '\
     'first_order_date debug order_details order_properties'
@@ -81,39 +84,70 @@ LARGE = 'LARGE'
 def _neaf_ss_fields():
     return NEAF_VENDOR_FIELDS[NEAF_VENDOR_FIELDS.index('company last_order_date'):NEAF_VENDOR_FIELDS.index('error')+5]
 NeafSSTup = namedtuple('NeafSSTup', _neaf_ss_fields())
-NEAF_VENDOR_PROPERTIES_FIELDS = 'company_from_property cellno name_on_badge badge1_name badge2_name requested_booth_loc prize1 prize1_value prize2 prize2_value extra_badge_names '+\
+NEAF_VENDOR_PROPERTIES_FIELDS = 'company_from_property cellno name_on_badge badge1_name badge2_name requested_booth_loc get_booths_from prize1 prize1_value prize2 prize2_value extra_badge_names '+\
                                 'ive_reviewed_vendor_packet error'
 NeafVendorPropertiesTup = namedtuple('NeafVendorPropertiesTup',NEAF_VENDOR_PROPERTIES_FIELDS)
 
-DoorPrizeSrcDicts = namedtuple('DoorPrizeSrcDicts', 'winner cc cc_reject cc_dates_to_ignore_cnt shopify')
+DoorPrizeSrcDicts = namedtuple('DoorPrizeSrcDicts', 'winner cc cc_reject shopify')
 DoorPrizeResDicts = namedtuple('DoorPrizeResDicts', 'eligible reject')
 NEAF_VENDOR_COLLECTIONS_FIELDS = 'raw neaf_ss full vendor_invoices vendor_last_order_date_map last_order_date_vendors_map company_badge'
 NeafVendorCollectionsTup = namedtuple('NeafVendorCollectionsTup', NEAF_VENDOR_COLLECTIONS_FIELDS)
 
 MAX_KEY_SUFFIX = 100
 DOOR_PRIZE_DIR = 'door_prize'
-DOOR_PRIZE_WINNER = 'door_prize_winner'
+DOOR_PRIZE_WINNER = 'door_prize_winner_{neaf_year}_{neaf_day_of_week}'
 DICT_DELIMITER_FRONT = '+-------------+ '
 STARS = '*******************************************************************************************************'
 
+def set_precommit_sanity_check():
+    consts.PRECOMMIT_SANITY_CHECK = None
+    precommit_filename = None
+    for frame_info in inspect.stack():
+        filename = frame_info.filename
+        if filename.endswith("precommit_sanity.py"):
+            precommit_filename = filename
+            if 'RAC_share' in filename:
+                consts.PRECOMMIT_SANITY_CHECK = 'RAC_share'
+            elif 'RAC' in filename:
+                consts.PRECOMMIT_SANITY_CHECK = 'RAC'
+            else:
+                print(f"Failure setting consts.PRECOMMIT_SANITY_CHECK in set_precommit_sanity_check(). Expecting to find either 'RAC' or 'RAC_share' in {filename}.")
+    if consts.PRECOMMIT_SANITY_CHECK:
+        print(f"In set_precommit_sanity_check() consts.PRECOMMIT_SANITY_CHECK set to {consts.PRECOMMIT_SANITY_CHECK} because filename of executable is {precommit_filename}.")
+    return
+set_precommit_sanity_check()
 
 def RAC_DIR():
+
     ddir = os.path.expanduser(r"~\Desktop")
-    if not os.path.isdir(ddir):
-        raise Exception('In RAC_DIR() desktop path {0} does not exist.'.format(ddir))
-    toks = ddir.split('\\')
-    ddir_with_onedrive = '\\'.join(toks[:-1] + ['OneDrive','Desktop'])
-    if os.path.isdir(ddir_with_onedrive):
-        print("In RAC_DIR() the path {0} exists implying the user is backing up desktop on OneDrive. Do not use {1}.".format(ddir_with_onedrive,ddir))
-        ddir = ddir_with_onedrive
+    ddir_onedrive = os.path.expanduser(r"~\OneDrive\Desktop")
+    ddir_exists = os.path.isdir(ddir)
+    ddir_onedrive_exists = os.path.isdir(ddir_onedrive)
+    if not ddir_exists and not ddir_onedrive_exists:
+        raise Exception(f'In RAC_DIR() neither desktop paths {ddir} or {ddir_onedrive} exist. Need at least one.')
+
+    if ddir_onedrive_exists:
+        ddir = ddir_onedrive
     racdir = os.path.join(ddir,'RAC_DIR')
+
+    last_racdir = getattr(RAC_DIR,'_last_racdir',None)
+    if consts.PRECOMMIT_SANITY_CHECK:
+        # 1/28/2026. if we are in pre-commit sanity check mode. we do something like this code block below. just use value of PRECOMMIT_SANITY_CHECK set in set_precommit_saity_check.
+        racdir = os.path.join(racdir,'precommit_sanity',consts.PRECOMMIT_SANITY_CHECK)
+        if racdir != last_racdir:
+            print(f"In RAC_DIR() return {racdir} because consts.PRECOMMIT_SANITY_CHECK is {consts.PRECOMMIT_SANITY_CHECK}.")
+    else:
+        if racdir != last_racdir:
+            print(f"In RAC_DIR() return {racdir}.")
+    RAC_DIR._last_racdir = racdir
+
     return racdir
 
 def door_prize_dir():
     return os.path.join(RAC_DIR(),DOOR_PRIZE_DIR)
 
-def pdf_path():
-    fname = os.path.join(door_prize_dir(), DOOR_PRIZE_WINNER + '.pdf')
+def pdf_path(neaf_year,neaf_day_of_week):
+    fname = os.path.join(door_prize_dir(), DOOR_PRIZE_WINNER.format(neaf_year=neaf_year,neaf_day_of_week=neaf_day_of_week) + '.pdf')
     return fname
 
 def get_emails_in_door_prize_dict(door_prize_dict):
@@ -122,29 +156,25 @@ def get_emails_in_door_prize_dict(door_prize_dict):
         emails_in_door_prize_dict[dpt.email] = dpt
     return emails_in_door_prize_dict
 
+def goodDateStr(dstr):
+    date_str = None
+    error_msg = ''
+    dstr = '' if not dstr else str(dstr)
+    if not dstr.strip():
+        dstr = 'BLANK'
+    try:
+        date_str =  parser.parse(dstr).strftime('%Y-%m-%d')
+        return date_str,error_msg
+    except ValueError:
+        error_msg = "Date of '{0}' is not valid.".format(dstr)
+        return date_str,error_msg
+
 def get_default_neaf_year():
     # a safe date to start NEAF for following year is november
     month = datetime.datetime.now().date().month
     year = datetime.datetime.now().date().year
     year = year + 1 if month >= 11 else year
     return year
-
-def get_weekend_day(override_day):
-    if override_day.upper() == SATURDAY.upper():
-        return SATURDAY
-    elif override_day.upper() == SUNDAY.upper():
-        return SUNDAY
-    elif override_day != DEFAULT_DAY:
-        return ERROR
-
-    now = datetime.datetime.now()
-    day = now.strftime("%A").upper()
-
-    if day == SATURDAY.upper():
-        return SATURDAY
-    elif day == SUNDAY.upper():
-        return SUNDAY
-    return ERROR
 
 def get_date(date_and_time_str):
     if not date_and_time_str:
@@ -195,18 +225,11 @@ def utc_for_midnight_local(dt):
     return utc_str
 
 def delta_on_date_str(dtstr,days):
-    dt = datetime.datetime.strptime(dtstr,'%Y-%m-%d').date()
+    dt = date.fromisoformat(dtstr)
     dt = dt + datetime.timedelta(days=days)
     new_date_str =  datetime.datetime.strftime(dt,"%Y-%m-%d")
     return new_date_str
-    
-def day_of_week_invalid(ccdpt,weekend_day):
-    dtstr = ccdpt.modified_date[:10]
-    dt = datetime.datetime.strptime(dtstr,'%Y-%m-%d').date()
-    dow = dt.strftime("%A")
-    invalid_day = None if dow == weekend_day else dow
-    return invalid_day        
-    
+
 def convertToStr(msgs):
     msg = ''
     for m in msgs:
@@ -264,6 +287,35 @@ def remove_unicode(data):
 
     else:
         return data
+
+def getCurrencySymbolFromCode(code):
+    code = code.strip()
+    return CURRENCY_SYMBOL_FROM_CODE.get(code,code+' ')
+
+_BIDI = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+def normalize_unicode_text(s):
+
+    # 2/20/2026. XXX this function suggested by ChatGPT to
+    #                removing Unicode format/control characters (category Cf)
+    #                normalizing compatibility characters (NFKC)
+    #                converting non-breaking whitespace to normal whitespace
+    #                producing display-safe, width-stable text
+
+    if s is None:
+        return ""
+
+    # normalize compatibility forms (helps with odd punctuation/spaces)
+    s = unicodedata.normalize("NFKC", s)
+    # NBSP -> plain space
+    s = s.replace("\u00a0", " ")
+    # remove bidi marks
+    s = _BIDI.sub("", s)
+    # remove other invisible "format" chars (Unicode category Cf)
+    s = "".join(ch for ch in s if unicodedata.category(ch) != "Cf")
+    # collapse whitespace runs
+    s = re.sub(r"[ \t]+", " ", s).strip()
+
+    return s
 
 def writerow_UnicodeEncodeError(wr,mrow):
     # 7/23/2020. this function written because this mrow failed:
@@ -332,6 +384,22 @@ def get_target_dict(search_for_orig,samdt,key,source_dict=None):
     if not target_dict:
         msg = "Searched in {0} records but cannot find item '{1}'.".format(len(source_dict),search_for_orig)
     return target_dict,msg
+
+def appendMsg(msg,new_msg=None,print_new_msg=True):
+    if new_msg is None:
+        # 1/28/2026. we are just starting to accumulate msg. treat msg as initial value
+        if print_new_msg:
+            print(msg)
+        return msg
+    if not new_msg:
+        return msg
+    if print_new_msg:
+        print(new_msg)
+    if msg:
+        msg = msg + '\n' + new_msg
+    else:
+        msg = new_msg
+    return msg
 
 def show_dict(dp_dict,fname):
     msgs = []
@@ -419,42 +487,28 @@ def build_door_prize_dict_from_file(fname,verbose,exit_message=False):
         print(msg.format(len(door_prize_dict),fname))
     return door_prize_dict
 
-def read_door_prize_file(fname, verbose, exit_message=False):
-    fname = os.path.join(door_prize_dir(),fname+'.csv')
+def read_door_prize_file(fname, neaf_year, neaf_day_of_week, verbose, exit_message=False):
+    fname = os.path.join(door_prize_dir(),fname.format(neaf_year=neaf_year, neaf_day_of_week=neaf_day_of_week)+'.csv')
     door_prize_dict = build_door_prize_dict_from_file(fname,verbose,exit_message)
     return door_prize_dict,fname
 
-def build_door_prize_cc_dict(ccdpt_list,door_prize_dict,weekend_day,cc_dates_to_ignore,verbose,use_both_days=False):
-    # ccdpt_list of CcDoorPrizeTup namedtuples from constant contact. remove_unicode to dict of DoorPrizeTup namedtuples.
-    # check email addresses in ccdpt_list. if any exist in door_prize_dict don't add item to door_prize_cc_dict.
-    # if logging on display those rejected items.
+def build_door_prize_cc_dict(ccdpt_list, door_prize_dict, verbose):
 
-    # TODO need a good way to test only certain days. Use weekend_day to pick a day with cc modified_date. Then add a bunch of
-    # Constant Contact entries for both saturday and sunday in cc. If cc items in wrong day dump into rejected dict. modify
-    # sku in rejected list to indicate reason for rejection, either bad day or already in shopify.
+    # ccdpt_list is list of CcDoorPrizeTup namedtuples from constant contact already filtered by date.
+    # check email addresses in ccdpt_list. if any exist in door_prize_dict don't add item to door_prize_cc_dict.
+    # if logging on, display those rejected items.
+    # modify sku in rejected list to indicate reason for rejection. Only current reason for rejection is already in shopify.
 
     emails_in_door_prize_dict = get_emails_in_door_prize_dict(door_prize_dict)
     door_prize_cc_dict = {}
     door_prize_cc_reject_dict = {}
-    cc_dates_to_ignore_cnt = 0
     cnt = 0
     cnt_rej = 0
     for ccdpt in ccdpt_list:
-        if ccdpt.modified_date[:10] in cc_dates_to_ignore:
-            cc_dates_to_ignore_cnt += 1
-            continue
-        # use_both_days is True when calling from search_and_confirm
-        invalid_day = False if use_both_days else day_of_week_invalid(ccdpt,weekend_day)
+
         cc_name = ccdpt.first_name+' '+ccdpt.last_name
         e_dpt = emails_in_door_prize_dict.get(ccdpt.email_address)
-        if invalid_day:
-            if verbose:
-                msg = 'Rejecting Constant Contact door prize entry email:{0}, name:{1} because day of week of entry of {2} is invalid. Only entries on {3} are valid.'
-                print(msg.format(ccdpt.email_address, cc_name, invalid_day, weekend_day))
-            cnt_rej += 1
-            key = 'cc_rej{:0>3d}'.format(cnt_rej)
-            cc_sku = 'cc_rej:wrong_day'
-        elif e_dpt: 
+        if e_dpt:
             if verbose:
                 msg = 'Rejecting Constant Contact door prize entry email:{0}, name:{1} because Shopify order {2}, name:{3} has same email address.'
                 print(msg.format(ccdpt.email_address,cc_name,e_dpt.order_num,e_dpt.email))   
@@ -465,13 +519,14 @@ def build_door_prize_cc_dict(ccdpt_list,door_prize_dict,weekend_day,cc_dates_to_
             cnt += 1
             key = 'cc{:0>4d}'.format(cnt)
             cc_sku = 'cc_door_prize'
+
         dpt = DoorPrizeTup(key, N_A, ccdpt.modified_date, cc_name, ccdpt.home_phone, ccdpt.email_address, cc_sku, '1', None)
-        if e_dpt or invalid_day:
+        if e_dpt:
             door_prize_cc_reject_dict[key] = dpt    
         else:      
             door_prize_cc_dict[key] = dpt
             
-    return door_prize_cc_dict,door_prize_cc_reject_dict,cc_dates_to_ignore_cnt
+    return door_prize_cc_dict,door_prize_cc_reject_dict
 
 def normalizeAddress(default_address):
 
@@ -493,7 +548,7 @@ def normalizeAddress(default_address):
     address1 = default_address['address1'] if default_address['address1'] else ''
     address2 = default_address['address2'] if  default_address['address2'] else ''
     city = default_address['city'] if default_address['city'] else ''
-    province_key = 'province' if USE_GRAPHQL[0] else 'province_code'
+    province_key = 'province'
     province_code = default_address[province_key] if default_address[province_key] else ''
     zipc = default_address['zip'] if default_address['zip'] else ''
     country = default_address['country'] if default_address['country'] else ''
@@ -503,16 +558,10 @@ def normalizeAddress(default_address):
     address1,address2 = fixBigAddress1(address1,address2)
     return address1,address2,address3,city,province_code,zipc,country
     
-def write_door_prize_file(door_prize_winner_dict, fname):
+def write_door_prize_file(door_prize_winner_dict, fname, neaf_year, neaf_day_of_week):
 
-    if not os.path.exists(door_prize_dir()):
-        try:
-            os.makedirs(door_prize_dir())
-        except Exception as ex:
-            msg = "Failure in write_door_prize_file executing os.makedirs('{0}').\nException:\n{1}".format(door_prize_dir(),ex)
-            raise Exception(msg)
-
-    fpath = os.path.join(door_prize_dir(),fname+'.csv')
+    os.makedirs(door_prize_dir(),exist_ok=True)
+    fpath = os.path.join(door_prize_dir(),fname.format(neaf_year=neaf_year,neaf_day_of_week=neaf_day_of_week)+'.csv')
     msg = 'Writing door prize winner file {0} with {1} rows.'
     print(msg.format(fpath,len(door_prize_winner_dict)))
     with open(fpath,'w') as outfile:
@@ -522,11 +571,11 @@ def write_door_prize_file(door_prize_winner_dict, fname):
             writer.writerow(dpt)
     return
 
-def show_paths_and_files_dp():
+def show_paths_and_files_dp(neaf_year,neaf_day_of_week):
     msg =  '---------------------------------------------------------------------------------------------------\n'
     msg += 'Directory for all Door Prize items:            '+door_prize_dir()+'\n'
-    msg += 'Winners filename:                       '+os.path.join(door_prize_dir(),DOOR_PRIZE_WINNER+'.csv') + '\n'
-    msg += 'Winners pdf:                            '+pdf_path()+'\n'
+    msg += 'Winners filename:                       '+os.path.join(door_prize_dir(),DOOR_PRIZE_WINNER.format(neaf_year=neaf_year,neaf_day_of_week=neaf_day_of_week)+'.csv') + '\n'
+    msg += 'Winners pdf:                            '+pdf_path(neaf_year,neaf_day_of_week)+'\n'
     msg += '---------------------------------------------------------------------------------------------------'
     return msg
 
@@ -569,7 +618,7 @@ def getPropertiesDict(properties, excluded_items):
     return propertiesDict
 
 def showError(error):
-    return '\n{0}\n{0}\n{1}\n{0}\n{0}\n\n'.format(STARS,error)
+    return '\n{0}\n{1}\n{0}\n'.format(STARS,error)
 
 def build_startup_parameters(argv):
 

@@ -11,13 +11,20 @@ import json
 # 7/8/2025 install with
 #          pip install flask
 #          use pip3 on mac
+import os
+import csv
 import socket
+import time
+from datetime import date,datetime
+import io
+import requests
 from flask import Flask, request, redirect
 import urllib.parse
-import requests
 import webbrowser
-from consts import MISSING
+from consts import MISSING,NEAF_YEAR_VALID,NEAF_DAYS,NEAF_DATES,NEAF_YEAR_DEFAULT,NEAF_YEAR_2025,DEFAULT_DAY,SATURDAY,SUNDAY,NEAF_YEAR_2026
 from credentials import Credentials
+from utils import RAC_DIR,writerow_UnicodeEncodeError,appendMsg,normalize_unicode_text
+from date_filter_utils import parse_constant_contact_date_filter_args
 
 from utils import convert_utc_to_local_datetime,remove_unicode
 
@@ -33,6 +40,7 @@ from utils import convert_utc_to_local_datetime,remove_unicode
 #                    access_token generated in this step can be ignored since prod code gets access token from refresh token in call to get_access_token_from_refresh_token().
 refresh_token = Credentials().CC_REFRESH_TOKEN
 
+CC_API_BASE = "https://api.cc.email/v3"
 CC_DOOR_PRIZE_FIELDS = 'first_name last_name home_phone email_address modified_date'
 CcDoorPrizeTup = namedtuple('CcDoorPrizeTup', CC_DOOR_PRIZE_FIELDS)
 
@@ -50,8 +58,8 @@ port = 8080  # find_free_port() #
 # 2/28/2025. the biggest trick copilot told me to get this working was to replace redirect_uri = f'http://localhost:{port}/callback' with value below and also
 #            make same change in
 redirect_uri = f'http://127.0.0.1:{port}/callback'
-# 2/27/2025. this is list_id for "NEAF_Door_Prize_Registration"
-list_id = Credentials().CC_NEAF_DOOR_PRIZE_REGISTRATION_LIST_ID
+# 2/27/2025. this is LIST_ID for "NEAF_Door_Prize_Registration"
+LIST_ID = Credentials().CC_NEAF_DOOR_PRIZE_REGISTRATION_LIST_ID
 limit = 200
 
 scope = "contact_data campaign_data offline_access"
@@ -72,7 +80,13 @@ def get_access_token_from_refresh_token():
         "refresh_token": refresh_token,
     }
 
-    response = requests.post(token_url, headers=headers, data=data)
+    try:
+        response = requests.post(token_url, headers=headers, data=data)
+    except Exception as ex:
+        msg = f'\nFailure in get_access_token_from_refresh_token() calling requests.post(token_url, headers=headers, data=data).\nException:\n{ex}'
+        print(f'{msg}\ntoken_url : {token_url}\nheaders : {headers}\ndata : {data}\n')
+        msg += '\nSee more details in log.'
+        raise Exception(msg)
     st = response.status_code
     if st != 200:
         msg = f'\nFailure in get_access_token_from_refresh_token(). requests.post(token_url, headers=headers, data=data) returned status_code:{st}. Must be 200 for success.'
@@ -93,7 +107,33 @@ def get_access_token_from_refresh_token():
 
     return new_access_token
 
+def flatten_contacts(all_contacts):
+    all_contacts_new = []
+    for contact in all_contacts:
+        contact_new = {}
+        for k,v in contact.items():
+            if isinstance(v,dict):
+                for k1,v1 in v.items():
+                    contact_new[k+':'+k1] = v1
+            elif isinstance(v,list):
+                for i,v1 in enumerate(v):
+                    for k2,v2 in v1.items():
+                        contact_new[k+':'+k2+':'+str(i)] = v2
+            else:
+                contact_new[k] = v
+        all_contacts_new.append(contact_new)
+
+    max_keys = []
+    for contacts_new in all_contacts_new:
+        keys = contacts_new.keys()
+        if len(keys) > len(max_keys):
+            max_keys = keys
+
+    return max_keys,all_contacts_new
+
 def get_constant_contact_door_prize_list(start_date):
+
+    # 2/18/2026. TODO this function has been deprecated and is replaced by cc_export_contacts_as_rows.
 
     access_token = get_access_token_from_refresh_token()
 
@@ -111,7 +151,7 @@ def get_constant_contact_door_prize_list(start_date):
 
     # new url for "NEAF_Door_Prize_Registration"
     base_url = "https://api.cc.email"  # Base URL for Constant Contact API
-    next_link = f"{base_url}/v3/contacts?lists={list_id}&limit={limit}&updated_after={start_date}T12:00:00Z"
+    next_link = f"{CC_API_BASE}/contacts?lists={LIST_ID}&limit={limit}&updated_after={start_date}T12:00:00Z"
     all_contacts = []
 
     i = 0
@@ -147,7 +187,9 @@ def get_constant_contact_door_prize_list(start_date):
 
     print('Exiting get_constant_contact_door_prize_list with len(all_contacts_new):{0}\n'.format(len(all_contacts)))
 
-    return all_contacts_new
+    max_keys,all_contacts_new = flatten_contacts(all_contacts_new)
+
+    return max_keys,all_contacts_new
 
 def print_ccDoorPrizeTup_list(ccdpt_list):
     cnt=0
@@ -162,53 +204,231 @@ def print_ccDoorPrizeTup_list(ccdpt_list):
         name_max = len(name) if len(name)>name_max else name_max
         email_max = len(ccdpt.email_address) if len(ccdpt.email_address)>email_max else email_max
         phone_max = len(ccdpt.home_phone) if len(ccdpt.home_phone)>phone_max else phone_max
-    fmt = '{{:{0}d}}: {{:{1}s}} -- {{:{2}s}}  {{:{3}s}}  {{:{4}s}}'.format(cnt_max,name_max,email_max,phone_max,19)
+    fmt = '{{:{0}d}}: {{:{1}s}}    {{:{2}s}}  {{:{3}s}}  {{:{4}s}}'.format(cnt_max,name_max,email_max,phone_max,19)
     cnt=0
     for ccdpt in ccdpt_list:
         cnt += 1
         print(fmt.format(cnt,ccdpt.first_name+' '+ccdpt.last_name,ccdpt.email_address,ccdpt.home_phone,ccdpt.modified_date))
     return   
 
-def convert_cc_res_to_ccDoorPrizeTup_list(neaf_end_date,cc_res):
+def convert_cc_res_to_ccDoorPrizeTup_list(rows):
     # only return items less than or equal to neaf_end_date
     ccdpt_list = []
 
     # remove unicode
-    cc_res = remove_unicode(cc_res)
+    cc_res = remove_unicode(rows)
 
     for cc_dict in cc_res:
-        first_name = cc_dict.get('first_name') or MISSING
-        last_name = cc_dict.get('last_name') or ''
-        home_phone = ''
-        for phone_number in cc_dict.get('phone_numbers',[]):
-            if phone_number.get('create_source') == 'Contact':
-                home_phone = phone_number.get('phone_number')
-                break
-        email_address = cc_dict.get('email_address',{}).get('address')
-        modified_date = cc_dict.get('updated_at') # [:19]
-        # date is in UTC format. remove_unicode to local datetime
-        modified_date = convert_utc_to_local_datetime(modified_date)
+        first_name = cc_dict.get(CC_FIRST_NAME) or MISSING
+        last_name = cc_dict.get(CC_LAST_NAME) or ''
+        phone_home = cc_dict.get(CC_PHONE_HOME) or ''
+        phone_mobile = cc_dict.get(CC_PHONE_MOBILE) or ''
+        phone = phone_mobile or phone_home
+        email_address = cc_dict.get(CC_EMAIL_ADDRESS)
+        modified_date = cc_dict.get(CC_UPDATED_AT) # [:19]
         modified_date = modified_date[:19]
-        ccdpt = CcDoorPrizeTup(first_name, last_name, home_phone, email_address, modified_date)
-        if modified_date[:modified_date.index('T')] <= neaf_end_date:
-            ccdpt_list.append(ccdpt)
+        ccdpt = CcDoorPrizeTup(first_name, last_name, phone, email_address, modified_date)
+        ccdpt_list.append(ccdpt)
     return ccdpt_list        
-    
-def get_cc_door_prize_list(neaf_start_date,neaf_end_date,verbose=False):
-    # TODO 3/2/2025. remove verbose arg. no longer used.
-    cc_res = get_constant_contact_door_prize_list(neaf_start_date)
-    ccdpt_list = convert_cc_res_to_ccDoorPrizeTup_list(neaf_end_date,cc_res)
-    return ccdpt_list        
-   
-def test_cc(neaf_start_date = None,verbose = False):
+
+def build_raw_cc_to_csv(cc_res_keys,cc_res):
+    fname = os.path.join(RAC_DIR(),'door_prize','raw_cc.csv')
+
+    os.makedirs(os.path.dirname(fname),exist_ok=True)
+    try:
+        with open(fname,'w',encoding="utf-8-sig") as csv_file:
+            wr = csv.writer(csv_file,  quoting=csv.QUOTE_ALL, lineterminator='\n') # delimiter=' ',quotechar='|', quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
+            wr.writerow(cc_res_keys)
+            for res in cc_res:
+                ntrow = []
+                for col in cc_res_keys:
+                    ntrow.append(res.get(col))
+
+                writerow_UnicodeEncodeError(wr,ntrow)
+    except Exception as ex:
+        error = appendMsg(f'\nConstant Contact raw data dump to csv failed with exception:\n{ex}')
+        return '',error
+    return appendMsg(f'Constant Contact raw data dump of {len(cc_res)} rows, {len(cc_res_keys)} columns at {fname}.'),''
+
+# 1/26/2026. these columns on left edge of raw Constant Contact csv
+CC_EMAIL_ADDRESS = 'Email address'
+CC_FIRST_NAME = 'First name'
+CC_LAST_NAME = 'Last name'
+CC_PHONE_HOME = 'Phone - home'
+CC_PHONE_MOBILE = 'Phone - mobile'
+CC_EMAIL_UPDATE_SOURCE = 'Email update source' # if 'contact' last update came from the signup page
+CC_SOURCE_NAME = 'Source Name' # if 'Website sign-up form' last update came from the signup page
+CC_CREATED_AT = 'Created At' # time stamp when first created. it doesn't change even if edits.
+CC_UPDATED_AT = 'Updated At' # time stamp of last edit on this contact
+CC_NAME_OF_ASTRONOMY_CLUB = 'Name of Astronomy Club'
+CC_COLS = [CC_EMAIL_ADDRESS,CC_FIRST_NAME,CC_LAST_NAME,CC_PHONE_HOME,CC_PHONE_MOBILE,CC_EMAIL_UPDATE_SOURCE,CC_SOURCE_NAME,CC_CREATED_AT,CC_UPDATED_AT,CC_NAME_OF_ASTRONOMY_CLUB]
+
+def cc_export_contacts_as_rows(poll_interval_sec=2.0, timeout_sec=300.0):
+    """
+    Simulate Constant Contact UI export:
+      1) POST /v3/activities/contact_exports
+      2) Poll the activity until state == "completed"
+      3) GET the results as text/csv
+      4) Parse CSV in-memory and return a list of dict rows
+
+    Returns:
+      rows: list of dict, where dict keys are the CSV header names (as CC emits them).
+
+    Notes:
+      - The CSV header names are typically humanized (e.g. "Email Address", "Source Name").
+      - Phone number columns in the CSV may be "Phone Number" / "Phone Number Type" (CC-controlled).
+      - This is the reliable way to get Source Name ("Website sign-up form") if your account/export supports it.
+    """
+
+    access_token = get_access_token_from_refresh_token()
+    headers_json = {"Authorization": f"Bearer {access_token}","Accept": "application/json","Content-Type": "application/json"}
+
+    # 1) Create export activity
+    create_url = f"{CC_API_BASE}/activities/contact_exports"
+    body = {"list_ids": [LIST_ID]}
+
+    rows = []
+    error = ''
+    msg = f'Submit request for Constant Contact csv data of requests.post(create_url, headers=headers_json, json=body, timeout=30)\nwith create_url:{create_url}, body:{body}'
+    msg = appendMsg(msg)
+    r = requests.post(create_url, headers=headers_json, json=body, timeout=30)
+    r.raise_for_status()
+    activity = r.json()
+
+    # These are relative hrefs like "/v3/activities/<id>" and "/v3/contact_exports/<file_export_id>"
+    activity_href = activity["_links"]["self"]["href"]
+    results_href = activity["_links"]["results"]["href"]
+
+    activity_url = "https://api.cc.email" + activity_href
+    results_url = "https://api.cc.email" + results_href
+
+    # 2) Poll activity until completed
+    deadline = time.time() + timeout_sec
+    cnt = 0
+    elapsed_time = 0
+    while True:
+        cnt += 1
+        msg = appendMsg(msg,f'Polling for completion of Constant Contact csv data at {activity_url}. elapsed time:{elapsed_time} secs')
+        rr = requests.get(activity_url, headers=headers_json, timeout=30)
+        rr.raise_for_status()
+        activity = rr.json()
+        state = activity.get("state")
+
+        if state == "completed":
+            msg =  appendMsg(msg,f'Polling complete after {elapsed_time} secs.')
+            break
+
+        if state == "failed":
+            error = f"Constant Contact export failed running {activity_url}: {activity.get('activity_errors')}"
+            msg = appendMsg(msg,error)
+            break
+
+        if time.time() > deadline:
+            error = f"Constant Contact export timed out running {activity_url} after {timeout_sec} seconds; last_state={state}"
+            msg = appendMsg(msg,error)
+            break
+
+        elapsed_time += poll_interval_sec
+        time.sleep(poll_interval_sec)
+
+    # 3) Download CSV
+    headers_csv = {"Authorization": f"Bearer {access_token}","Accept": "text/csv"}
+    csv_resp = requests.get(results_url, headers=headers_csv, timeout=60)
+    csv_resp.raise_for_status()
+    msg = appendMsg(msg,f'Downloaded csv data from {results_url}.')
+
+    # 4) Parse CSV into list of dict rows
+    text = csv_resp.content.decode("utf-8", errors="replace")
+    f = io.StringIO(text, newline="")
+    reader = csv.DictReader(f)
+
+    bad_row_cnt = 0
+    for nrows,row in enumerate(reader):
+
+        # 1/26/2026. this block re-orders items in row and places items in CC_COLS first
+        nr = {}
+        for cc in CC_COLS:
+            if cc in row:
+                nr[cc] = normalize_unicode_text(row[cc])
+        for k,v in row.items():
+            if k not in nr:
+                nr[k] = normalize_unicode_text(row[k])
+
+        if not nr[CC_EMAIL_ADDRESS] or not nr[CC_FIRST_NAME] or not nr[CC_LAST_NAME]:
+            bad_row_cnt += 1
+        else:
+            rows.append(nr)
+
+    fieldnames = reader.fieldnames
+    msg = appendMsg(msg,f'Downloaded {nrows + 1} rows, {len(fieldnames)} cols. Deleted {bad_row_cnt} rows missing email or name, {len(rows)} returned.')
+
+    return fieldnames,rows,msg,error
+def get_cc_door_prize_list(neaf_year,neaf_day,raw_cc_to_csv=False,verbose=False):
+
+    # 2/24/2026. call the Constant Contact csv download api with cc_export_contacts_as_rows.
+    #            Then transform those results to list of CcDoorPrizeTup(ccdpt_list) with convert_cc_res_to_ccDoorPrizeTup_list.
+    #            If date of cc row is inconsistent with NEAF day specified by neaf_year and neaf_day do not include in ccdpt_list.
+
+    neaf_year = str(neaf_year)
+    neaf_year_int,neaf_year_default_int,today,neaf_start,neaf_end,neaf_start_dow,neaf_end_dow,msg,msg_ex = parse_constant_contact_date_filter_args(neaf_year, neaf_day)
+    if msg_ex:
+        raise Exception(msg_ex)
+
+    fieldnames,rows,msg2,error = cc_export_contacts_as_rows()
+    msg = appendMsg(msg,msg2)
+
+    if raw_cc_to_csv:
+        msg2,error = build_raw_cc_to_csv(fieldnames,rows)
+        msg = appendMsg(msg,msg2,print_new_msg=False)
+
+    # 2/18/2026. trim raw cc result down to requested NEAF year and NEAF days
+    day_of_week_counts = {}
+    rows_dict = {}
+
+    # 2/23/2026. XXX this block sets all additional filtering logic based on neaf_year and neaf_day.
+
+    updated_at_valid_days = []
+    if neaf_year_int == neaf_year_default_int and today in (neaf_start,neaf_end):
+        # 2/19/2026. XXX this is block we take during actual PROD runs on days of NEAF. We also can take this block when testing with dummy values of neaf days default.
+        updated_at_valid_days.extend([today])
+    else:
+        if neaf_day == DEFAULT_DAY:
+            updated_at_valid_days.extend([neaf_start,neaf_end])
+        elif neaf_day == SATURDAY:
+            updated_at_valid_days.append(neaf_start)
+        elif neaf_day == SUNDAY:
+            updated_at_valid_days.append(neaf_end)
+
+    for row in rows:
+        updated_at = row[CC_UPDATED_AT]
+        updated_at_date = updated_at[:10]
+
+        if updated_at_date in updated_at_valid_days:
+            dow = date.fromisoformat(updated_at_date).strftime('%A')
+            count = day_of_week_counts.get(dow,0)
+            day_of_week_counts[dow] = count + 1
+            rows_dict[updated_at] = row
+
+    rows_new = [rows_dict[k] for k in sorted(rows_dict)]
+    # 2/25/2026. this was ChatGPTs clever idea. I hope I can mentally retain it but I doubt I can.
+    has_weekday = bool(set(day_of_week_counts) - {SATURDAY, SUNDAY})
+    if has_weekday:
+        msg2 = 'WARNING: RUNNING IN TEST MODE. NEAF start and end days of week not Saturday and Sunday.\n' +\
+               f"neaf_start_dow:{neaf_start_dow} has {day_of_week_counts.get(neaf_start_dow,0)} rows and {neaf_end_dow} has {day_of_week_counts.get(neaf_end_dow,0)} rows."
+        msg = appendMsg(msg,msg2)
+    uavd = ' - '.join(updated_at_valid_days)
+    counts_str = ', '.join([f"{k}:{v}" for k,v in day_of_week_counts.items()])
+    msg = appendMsg(msg,f"After applying filter using neaf_year:{neaf_year}, neaf_day:{neaf_day}, ({uavd}) row cnt reduced from {len(rows)} to {len(rows_new)} with {counts_str}.")
+
+    ccdpt_list = convert_cc_res_to_ccDoorPrizeTup_list(rows_new)
+    return ccdpt_list,msg
+
+def cc_test(neaf_year = NEAF_YEAR_2026, neaf_day = DEFAULT_DAY, verbose = False):
 
     # 2/28/2025. this function tests the public interface to Constant Contact which is get_cc_door_prize_list.
 
-    #neaf_start_date = '2014-12-01' good for testing door prize list
-    #neaf_start_date = '2014-01-01' good for testing dummy SSP 2013 list
-    neaf_end_date = '2025-04-06'
-    ccdpt_list = get_cc_door_prize_list(neaf_start_date,neaf_end_date,verbose)
-    print_ccDoorPrizeTup_list(ccdpt_list) 
+    ccdpt_list,msg = get_cc_door_prize_list(neaf_year,neaf_day,raw_cc_to_csv=True,verbose=verbose)
+    print_ccDoorPrizeTup_list(ccdpt_list)
     return
 
 def get_authorization_code():
@@ -284,26 +504,18 @@ def exchange_authorization_code_for_access_token_and_refresh_token(auth_code=Non
         print(response.json())
     return
 
-def tutorial_api():
-
-    # 2/28/2025. this function tests this get_constant_contact_door_prize_list which is a fairly raw representation of what Constant Contact returns
-    #            from its web api. The only adjustment is a sort in reverse order by updated_at. That's a good convenience when eyeballing the results.
-
-    start_date = '2024-12-01'
-    all_contacts = get_constant_contact_door_prize_list(start_date)
-
-    return
 
 if __name__ == "__main__":
-    tutorial_api()
-    #get_access_token_from_refresh_token()
+    pass
+    # get_access_token_from_refresh_token()
 
     # run test_cc in console or uncomment next line and run here
     # in order to import this file must comment out next line
-    #test_cc('2020-01-25')
+    cc_test()
 
     # TODO 2/27/2025. get the auth code passed to exchange_authorization_code_for_access_token_and_refresh_token(...) by first running get_authorization_code()
     #get_authorization_code()
     #exchange_authorization_code_for_access_token_and_refresh_token(auth_code='qjFJLw1jSUwb2dtutyC6d2xcwKbeU-pBAVhYeGVgaI8')
+
 
     
