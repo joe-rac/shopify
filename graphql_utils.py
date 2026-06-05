@@ -87,6 +87,7 @@ def load_and_adjust_custom_attributes(order_num,key,value=None,delete_key=False)
         return msg,order_id,success,customAttributes
     gql = ORDER_ID_AND_NOTE_ATTRIBUTES.replace('#ORDER_NUM', str(order_num))
     url, headers = get_url_and_headers()
+    # 6/2/2026. this call to requests.post is not replaced with post_and_json_decode_with_retry because no current use case for retries needed for customAttributes edits.
     response = requests.post(url, data=gql, headers=headers)
     msg = appendMsg(msg,f'status_code from requests.post:{response.status_code}',print_new_msg=False)
     rd = response.json()
@@ -168,6 +169,7 @@ def mutate_custom_attributes(order_num, order_id, customAttributes):
     r_headers = {'Content-Type': 'application/json'}
     req = f"https://{SHOP_NAME}.myshopify.com/admin/api/{ADMIN_API_VERSION}/graphql.json"
 
+    # 6/2/2026. this call to requests.post is not replaced with post_and_json_decode_with_retry because its for mutate. no current use case for retries with mutate.
     r = requests.post(url=req, data=note_update, auth=(Credentials().SHOPIFY_API_KEY_RW,Credentials().SHOPIFY_PASSWORD_RW),headers = r_headers)
     if r.status_code != 200:
         msg = f"Failed updating customAttributes:\n{vstr}\nin shopify. Response status_code:{r.status_code} is invalid. Expecting 200.\nYou're fucked. Contact your programmer."

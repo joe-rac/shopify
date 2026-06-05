@@ -1,13 +1,10 @@
 
-import pprint
-import requests
-import json
 # valid sku keys
 from consts import MEMBERSHIP,DONATION,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAIC_ATTEND,RAD,HSP,HSP_RAFFLE,RLS,SSP,DOOR_PRIZE,MERCH,NEAF_VENDOR,ADMIN,ALL
-from consts import SHOP_NAME,ADMIN_API_VERSION,NEAF_YEAR_DEFAULT
+from consts import SHOP_NAME,ADMIN_API_VERSION,NEAF_YEAR_DEFAULT,SATURDAY
 from credentials import Credentials
-from orders import AccessOrders,Orders
-from utils import remove_unicode
+from orders import Orders
+from door_prize import DoorPrize
 from neaf_vendor import NEAFVendor
 
 import tracemalloc
@@ -174,12 +171,47 @@ def neafvendor_load(neaf_year=NEAF_YEAR_DEFAULT,verbose=False):
 
     return
 
+def tutorial_door_prize(override_day=SATURDAY,verbose=True):
+    dp = DoorPrize(override_day=override_day,verbose=verbose)
+    if dp.error:
+        print('after DoorPrize(override_day=override_day, verbose=verbose):\ndp.error:\n{0}dp.msg:\n{1}'.format(dp.error,dp.msg))
+        return
+    dp.constantContactAndShopifyLoad()
+    if dp.error:
+        print('after dp.constantContactAndShopifyLoad():\ndp.error:\n{0}dp.msg:\n{1}'.format(dp.error,dp.msg))
+        return
+    print(dp.show_dicts_summary())
+    return
+
+def tutorial_door_prize_constant_contact_only(neaf_year = NEAF_YEAR_DEFAULT,override_day=SATURDAY, verbose=True):
+
+    from date_filter_utils import calc_date_items_from_neaf_year_and_day
+    from constant_contact import get_cc_door_prize_list
+
+    created_at_max, neaf_day_of_week, neaf_other_day_of_week, error = calc_date_items_from_neaf_year_and_day(neaf_year, override_day)
+    if error:
+        print(error)
+        return
+
+    ccdpt_list, msg = get_cc_door_prize_list(neaf_year,neaf_day_of_week,verbose=verbose)
+    #print(msg)
+
+    if not ccdpt_list:
+        print('\nNo Constant Contact door prize entries returned.')
+        return
+
+    print(f'\nConstant Contact returned {len(ccdpt_list)} door prize rows for neaf_year:{neaf_year}, neaf_day:{neaf_day_of_week}.')
+
+    return
+
 def main():
 
     # 3/2/2024. the 3 functions in this block has been tested as of this date
-    neafvendor_invoice_and_csv_from_orders()
+    #neafvendor_invoice_and_csv_from_orders()
     #neafvendor_load()
     #accesshopify_by_date_range_and_sku()
+    #tutorial_door_prize()
+    tutorial_door_prize_constant_contact_only()
 
     return
 main()

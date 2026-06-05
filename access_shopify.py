@@ -7,17 +7,16 @@ import copy
 # install with
 # pip install requests
 # use pip3 on mac
-import requests
-import json
+
 import datetime
 import pprint
 # install with
 # pip install python-dateutil
-# use pip3 on mac
 from dateutil import parser
 import tracemalloc
 from consts import ALL,RawOrdersTup,SKUS_TO_LOAD_DICT
 from utils import NeafVendorTup,OrderTup,utc_for_midnight_local
+from network_utils import post_and_json_decode_with_retry
 from date_filter_utils import initialize_neaf_year,initialize_created_at_min_and_max
 from graphql_queries import ORDER_DETAILS,ORDERS_BY_SKU_BETWEEN_DATES,ORDER_BY_NAME
 from graphql_utils import get_orders_cursor_items,get_url_and_headers,edges_node_to_list
@@ -281,11 +280,9 @@ class AccessShopify(object):
 
         while True:
             page += 1
-            request = requests.post(url, data=req, headers=headers)
-            res = json.loads(request.text)
-            errors = res.get('errors')
-            if errors:
-                self.error = pprint.pformat(errors,width=100)
+            res, error = post_and_json_decode_with_retry(url, headers, req)
+            if error:
+                self.error = pprint.pformat(error,width=100)
                 return
 
             if not self.order_to_debug:

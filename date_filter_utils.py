@@ -144,6 +144,8 @@ def calc_date_items_from_neaf_year_and_day(neaf_year,override_day):
         error = f'override_day:{override_day} is invalid. Must be one of NEAF_DAYS:{NEAF_DAYS}.'
         return None,None,None,error
 
+    neaf_year = int(neaf_year)
+
     neaf_start = NEAF_DATES[neaf_year][0]
     neaf_start_date = date.fromisoformat(neaf_start)
     neaf_start_dow = neaf_start_date.strftime("%A")

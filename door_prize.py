@@ -400,15 +400,3 @@ def main():
 # comment out next call to main before copying to RAC_share. uncomment only for testing.
 #main()
 
-def tutorial_door_prize(override_day=SATURDAY,verbose=True):
-    dp = DoorPrize(override_day=override_day,verbose=verbose)
-    if dp.error:
-        print('after DoorPrize(override_day=override_day, verbose=verbose):\ndp.error:\n{0}dp.msg:\n{1}'.format(dp.error,dp.msg))
-        return
-    dp.constantContactAndShopifyLoad()
-    if dp.error:
-        print('after dp.constantContactAndShopifyLoad():\ndp.error:\n{0}dp.msg:\n{1}'.format(dp.error,dp.msg))
-        return
-    print(dp.show_dicts_summary())
-    return
-#tutorial_door_prize()
