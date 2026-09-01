@@ -11,7 +11,7 @@ from credentials import Credentials
 from graphql_queries import MUTATE_CUSTOM_ATTRIBUTES
 from graphql_utils import mutate_custom_attributes
 from utils import NeafVendorPropertiesTup,normalizeAddress,NeafVendorTup,OrderDetailTup,OrderPropertiesTup,RAC_DIR,NOTE_ATTRIBUTE_KEY
-from utils import NeafSSTup,get_default_neaf_year,getFromProperties,goodDateStr
+from utils import NeafSSTup,get_default_neaf_year,getFromProperties,goodDateStr,appendMsg
 from pdf_neaf_vendor_invoice import convert_text_to_pdf_neaf_invoice
 
 # 1/26/2025. 2 critical functions for processing order_note_attributes are applyOrderNoteAttributeEdit and useOrderNoteAttributeEdits
@@ -148,7 +148,11 @@ def set_vendor_properties_tup(properties):
     badge2_name = getFromProperties('Name on 2nd Badge',properties,requested_properties)
     requested_booth_loc = getFromProperties('Req. Approximate Location',properties,requested_properties) or \
                           getFromProperties('Approx. Desired Location **',properties,requested_properties)
-    get_booths_from = getFromProperties('Get booths from this order',properties,requested_properties)
+    get_booths_from_order = getFromProperties('Get booths from this order',properties,requested_properties)
+    # 7/12/2026. #19065 has No. of stan. booths to get:1
+    no_st_booths_from_order = getFromProperties('No. of stan. booths to get',properties,requested_properties)
+    # 7/12/2026. #19067 has No. of prem. booths to get:1
+    no_pr_booths_from_order = getFromProperties('No. of prem. booths to get',properties,requested_properties)
     prize1 = getFromProperties('Prize Donation 1',properties,requested_properties)
     prize1_value = getFromProperties('Prize 1 Retail Value',properties,requested_properties)
     prize2 = getFromProperties('Prize Donation 2',properties,requested_properties)
@@ -159,8 +163,28 @@ def set_vendor_properties_tup(properties):
     extra_badge_names = getExtraBadgeNamesList(extra_badge_names)
     error = confirm_no_unexpected_fields_in_properties(requested_properties,properties)
 
-    nvpt = NeafVendorPropertiesTup(company_from_property,cellno,name_on_badge,badge1_name,badge2_name,requested_booth_loc,get_booths_from,prize1,prize1_value,prize2,prize2_value,extra_badge_names,
-                                   ive_reviewed_vendor_packet,error)
+    # 7/15/2026. some special treatment for no_st_booths_from_order and no_pr_booths_from_order. unfortunately the most reasonable data type supported for properties is string
+    #            but these items are either int or missing. handle that type checking and type conversion here. example is #19065, 'Astro-Tech' with no_st_booths_from_order:'1'
+
+    if isinstance(no_st_booths_from_order,str):
+        if not no_st_booths_from_order:
+            no_st_booths_from_order = 0
+        else:
+            if not no_st_booths_from_order.isdigit():
+                error = appendMsg(error,f"property of no_st_booths_from_order:'{no_st_booths_from_order}' is invalid. Must be either missing or an integer.")
+            else:
+                no_st_booths_from_order = int(no_st_booths_from_order)
+    if isinstance(no_pr_booths_from_order,str):
+        if not no_pr_booths_from_order:
+            no_pr_booths_from_order = 0
+        else:
+            if not no_pr_booths_from_order.isdigit():
+                error = appendMsg(error,f"property of no_pr_booths_from_order:'{no_pr_booths_from_order}' is invalid. Must be either missing or an integer.")
+            else:
+                no_pr_booths_from_order = int(no_pr_booths_from_order)
+
+    nvpt = NeafVendorPropertiesTup(company_from_property,cellno,name_on_badge,badge1_name,badge2_name,requested_booth_loc,get_booths_from_order,no_st_booths_from_order,no_pr_booths_from_order,
+                                   prize1,prize1_value,prize2,prize2_value,extra_badge_names,ive_reviewed_vendor_packet,error)
 
     return nvpt
 
@@ -275,6 +299,15 @@ def appendError(tup,error):
         tup = tup._replace(error=orig_error+' '+error)
     return tup
 
+def appendError_and_replace_in_nvt_dict(nvt_dict,nvt,error):
+    # 7/16/2026. it is assumed the passed in namedtuple of nvt is a NEAFVendorTup and key in nvt_dict is nvt.company and it already exists.
+    if not isinstance(nvt,NeafVendorTup):
+        raise Exception(f"In appendError_and_replace_in_nvt_dict(nvt_dict,nvt,error) nvt is of type {type(nvt).__name__}. Only supported type is NEAFVendorTup.")
+    nvt = appendError(nvt,error)
+    if nvt.company not in nvt_dict:
+        raise Exception(f"In appendError_and_replace_in_nvt_dict(nvt_dict,nvt,error) key of nvt.company:'{nvt.company}' does not exist in nvt_dict.")
+    nvt_dict[nvt.company] = nvt
+    return
 
 def get_price_in_shopifyCommonTup(sct):
     sku = sct.sku
@@ -334,7 +367,7 @@ def setCost(nvt,sct):
     elif sku.startswith('neaf_vendor_booth_premium_from_standard'):
         nvt = nvt._replace(upgrade_st_to_prem = cost,upgrade_st_to_prem_qty = qty)
     elif sku.startswith('neaf_vendor_booth_extra_ss_row'):
-        # 4/2/2026: orders that hit this block include 17724, 17728, 17729. all quantity adjustments for this sku made in NEAFVendor.populateTotalAdjBoothQty member function.
+        # 4/2/2026: orders that hit this block include 19065, 19066, 19067. all quantity adjustments for this sku made in NEAFVendor.populateTotalAdjBoothQty member function.
         pass
     elif sku.startswith('neaf_vendor_booth_premium'):
         nvt = nvt._replace(booth_prem = cost,booth_prem_qty = qty)
@@ -498,7 +531,7 @@ def mergeNvts(orig_nvt, new_nvt):
     orig_nvt = sumNvtItems(keys_to_be_summed,orig_nvt,new_nvt)
     # 12/29/2022 merging means concatenate string with "|"
     keys_to_be_merged = ('order_id','order_num','name','orderNumber','address1','address2','address3','phone_num','cellno','email','order_note','refund_note','refund_created_at',
-        'name_on_badge','badge1_name','badge2_name','extra_badge_names','get_booths_from','prize_donation','prize_donation_value','currencyCode',
+        'name_on_badge','badge1_name','badge2_name','extra_badge_names','get_booths_from_order','prize_donation','prize_donation_value','currencyCode',
         'donation_order_from_attribute','exclude_order_from_attribute','error')
     # 12/29/2022. all remaining items that can't be summed or merged ae handled here.
     orig_nvt = mergeUnusualItems(orig_nvt,new_nvt)
@@ -1030,11 +1063,7 @@ def save_invoice(target_company,target_company_invoice,as_pdf,subdir=None):
 
     if as_pdf:
         # build path for blank neaf letterhead
-        argv0 = sys.argv[0]
-        delim = '/' if '/' in argv0 else '\\'
-        toks = argv0.split(delim)
-        rac_root = '/'.join(toks[:-2])
-        blank_neaf_letterhead_path = rac_root + '/NEAF/docs/blank_neaf_letterhead.pdf'
+        blank_neaf_letterhead_path = os.path.join(os.path.dirname(__file__), 'blank_neaf_letterhead.pdf')
         fname_pdf = convert_text_to_pdf_neaf_invoice(blank_neaf_letterhead_path,fname)
         # remove the text version.
         os.remove(fname)

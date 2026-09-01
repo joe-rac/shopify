@@ -142,13 +142,13 @@ class AccessShopify(object):
                 # for created_at_min.
                 linkFull = ''
             else:
-                msg = "Failure getting Shopify data from internet while procesing URL\n{0}\nExpecting response.headers['Link'] to exist but its missing. " + \
+                msg = "Failure getting Shopify data from internet while procesing URL\n{0}\nExpecting response.headers['Link'] to exist but its missing. "\
                       "Its needed to support cursor-based pagination to next page. You're really fucked now. Pray. Wait a few minutes and try again."
                 self.error = msg.format(reqstr,response.status_code)
             return linkFull
 
         if 'rel="next"' not in linkFull and 'rel="previous"' not in linkFull :
-            msg = 'Failure getting Shopify data from internet while procesing URL\n{0}\n' + \
+            msg = 'Failure getting Shopify data from internet while procesing URL\n{0}\n'\
                 'Expecting to find either substring rel="next" or rel="previous" in response.headers[Link] but both are missing.'
             self.error = msg.format(reqstr)
             return linkFull

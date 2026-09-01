@@ -85,7 +85,7 @@ def get_access_token_from_refresh_token():
     new_refresh_token = token_data.get("refresh_token")
 
     if new_refresh_token != refresh_token:
-        msg = '\n\nWARNING\n\n************************\nIn get_access_token_from_refresh_token() old refresh_token has changed to new value\n' + \
+        msg = '\n\nWARNING\n\n************************\nIn get_access_token_from_refresh_token() old refresh_token has changed to new value\n'\
               'Update Credentials class variable for refresh_token in credentials.txt with this new refresh_token.'
         print(f'{msg}\nrefresh_token : {refresh_token}, new_refresh_token : {new_refresh_token}\n')
         msg += '\nSee more details in log.'
@@ -330,7 +330,7 @@ def get_cc_door_prize_list(neaf_year,neaf_day,raw_cc_to_csv=False,verbose=False)
     # 2/25/2026. this was ChatGPTs clever idea. I hope I can mentally retain it but I doubt I can.
     has_weekday = bool(set(day_of_week_counts) - {SATURDAY, SUNDAY})
     if has_weekday:
-        msg2 = 'WARNING: RUNNING IN TEST MODE. NEAF start and end days of week not Saturday and Sunday.\n' +\
+        msg2 = 'WARNING: RUNNING IN TEST MODE. NEAF start and end days of week not Saturday and Sunday.\n'\
                f"neaf_start_dow:{neaf_start_dow} has {day_of_week_counts.get(neaf_start_dow,0)} rows and {neaf_end_dow} has {day_of_week_counts.get(neaf_end_dow,0)} rows."
         msg = appendMsg(msg,msg2)
     uavd = ' - '.join(updated_at_valid_days)

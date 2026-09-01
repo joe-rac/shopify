@@ -236,15 +236,14 @@ class DoorPrize(AccessShopify):
         dpt_door_prize = door_prize_dict.get(order_num)
         dpt = dpt_cc or dpt_door_prize
         if not dpt:
-            msg = 'Failure adding key of {0} to door_prize_winner_dict of ' + \
-                  'size {1}. Its missing from door_prize_cc_dict of size {1} and door_prize_dict of size ' + \
+            msg = 'Failure adding key of {0} to door_prize_winner_dict of '\
+                  'size {1}. Its missing from door_prize_cc_dict of size {1} and door_prize_dict of size '\
                   '{2}'
             input(msg.format(order_num, len(door_prize_winner_dict), len(door_prize_cc_dict), len(door_prize_dict)))
             raise Exception
         dpt_orig = door_prize_winner_dict.get(order_num)
         if dpt_orig:
-            msg = 'Failure adding key of {0} to door_prize_winner_dict of ' + \
-                  'size {1}. It already exists in door_prize_winner_dict.'
+            msg = 'Failure adding key of {0} to door_prize_winner_dict of size {1}. It already exists in door_prize_winner_dict.'
             input(msg.format(order_num, len(door_prize_winner_dict)))
             raise Exception
         # use CONFIRM_NOTE as place to store time winner chosen. Thats useful for ui.

@@ -20,6 +20,7 @@ import inspect
 from dateutil import parser
 from datetime import date
 from collections import namedtuple
+from openpyxl import load_workbook
 
 import consts
 from consts import ERROR,MISSING,N_A,CURRENCY_SYMBOL_FROM_CODE
@@ -44,6 +45,8 @@ ORDER_DETAIL_FIELDS = 'created_at order_num sku name quantity unit_price unit_pr
 OrderDetailTup = namedtuple('OrderDetailTup', ORDER_DETAIL_FIELDS)
 ORDER_PROPERTIES_FIELDS = 'order_num names address1 address2 address3 phone_num email'
 OrderPropertiesTup = namedtuple('OrderPropertiesTup', ORDER_PROPERTIES_FIELDS)
+RAC_MEMBERSHIP_FIELDS = 'expiration_date last_name first_name email secondary_email'
+RacMembershipTup = namedtuple('RacMembershipTup', RAC_MEMBERSHIP_FIELDS)
 
 # XXX when changing NeafVendorTup make sure adjustments made to keys_to_be_summed and keys_to_be_merged in mergedNvts in neaf_vendor_utils.py .
 
@@ -55,10 +58,11 @@ OrderPropertiesTup = namedtuple('OrderPropertiesTup', ORDER_PROPERTIES_FIELDS)
 NEAF_VENDOR_FIELDS = 'order_num created_at sku quantity CONFIRM_NOTE '\
     'company_from_property company_from_attribute name_from_attribute '\
     'company last_order_date orderNumber name address1 address2 address3 phone_num cellno '\
-    'email booth_st_qty booth_st booth_prem_qty booth_prem upgrade_st_to_prem_qty upgrade_st_to_prem total_adj_booth_qty get_booths_from '\
+    'email booth_st_qty booth_st booth_prem_qty booth_prem '\
+    'upgrade_st_to_prem_qty upgrade_st_to_prem get_booths_from_order sent_booths_to_orders no_st_booths_from_order no_pr_booths_from_order '\
     'extra_tables_qty extra_tables extra_chairs_qty extra_chairs elec carpet additional_badges_qty additional_badges wifi shipping_box '\
     'shipping_pallet sponsorship donation donation_order_from_attribute exclude_order_from_attribute declined_neaf_2023 prize_donation prize_donation_value '\
-    'currencyCode total_cost  paid total_due check_number total_discounts  discount_codes booth_comments sales_comments order_note error '\
+    'currencyCode total_cost  paid total_due check_number total_discounts discount_codes booth_comments sales_comments order_note error '\
     'total_cost_presentment paid_presentment total_due_presentment total_discounts_presentment '\
     'shipping_box_qty shipping_pallet_qty order_num_to_donation_map order_note_attributes order_id refund_note refund_created_at '\
     'name_on_badge badge1_name badge2_name extra_badge_names badge_names_orig badge_entitled_cnt badge_names '\
@@ -67,7 +71,7 @@ NeafVendorTup = namedtuple('NeafVendorTup', NEAF_VENDOR_FIELDS)
 
 # 11/10/2018. new collection similar to NeafVendorTup and DoorPrizeTup need for orders app
 PROPERTIES_DICT = 'propertiesDict'
-ORDER_FIELDS = 'order_num order_id company_name created_at name first_name last_name address1 address2 address3 stateOrCountry phone_num email sku discount_code quantity ' +\
+ORDER_FIELDS = 'order_num order_id company_name created_at name first_name last_name address1 address2 address3 stateOrCountry phone_num email sku discount_code quantity '\
                'discount price total paid ' + PROPERTIES_DICT + ' note'
 ORDER_FIELDS_LIST = ORDER_FIELDS.split()
 OrderTup = namedtuple('OrderTup',ORDER_FIELDS)
@@ -84,8 +88,8 @@ LARGE = 'LARGE'
 def _neaf_ss_fields():
     return NEAF_VENDOR_FIELDS[NEAF_VENDOR_FIELDS.index('company last_order_date'):NEAF_VENDOR_FIELDS.index('error')+5]
 NeafSSTup = namedtuple('NeafSSTup', _neaf_ss_fields())
-NEAF_VENDOR_PROPERTIES_FIELDS = 'company_from_property cellno name_on_badge badge1_name badge2_name requested_booth_loc get_booths_from prize1 prize1_value prize2 prize2_value extra_badge_names '+\
-                                'ive_reviewed_vendor_packet error'
+NEAF_VENDOR_PROPERTIES_FIELDS = 'company_from_property cellno name_on_badge badge1_name badge2_name requested_booth_loc get_booths_from_order no_st_booths_from_order no_pr_booths_from_order '\
+                                'prize1 prize1_value prize2 prize2_value extra_badge_names ive_reviewed_vendor_packet error'
 NeafVendorPropertiesTup = namedtuple('NeafVendorPropertiesTup',NEAF_VENDOR_PROPERTIES_FIELDS)
 
 DoorPrizeSrcDicts = namedtuple('DoorPrizeSrcDicts', 'winner cc cc_reject shopify')
@@ -462,8 +466,7 @@ def get_key(dpt,door_prize_dict):
 def _populate_door_prize_dict(fname,dpt,key,door_prize_dict):
     dpt_old = door_prize_dict.get(key)
     if dpt_old:
-        msg = 'Duplicate key of {0} for entry {1} found processing file {2}. {3} '+\
-            'already has this key.'       
+        msg = 'Duplicate key of {0} for entry {1} found processing file {2}. {3} already has this key.'
         input(msg.format(key,dpt,fname,dpt_old,dpt))
         raise Exception
     door_prize_dict[key] = dpt 
@@ -649,6 +652,49 @@ def nvtDesc(nvt):
     msg = 'NeafVendorTup -- order_num:{0} name:{1} company:{2}|(from_attribute):{3}|(from_property):{4} sku:{5} email:{6}'
     msg = msg.format(nvt.order_num,nvt.name,nvt.company,nvt.company_from_attribute,nvt.company_from_property,nvt.sku,nvt.email)
     return msg
+
+def load_franks_rac_membership_spreadsheet(fname):
+
+    # 8/31/2026. load Frank's membership s/s. Name of form 'RAC AUGUST 2026 Membership.xlsx'. Frank says he creates a s/s of the form once a month near end of month.
+
+    error = ''
+    membership_list = []
+
+    try:
+        wb = load_workbook(fname, data_only=True)
+    except PermissionError:
+        error = f"\nUnable to open membership spreadsheet:\n{fname}\n" \
+                   "The spreadsheet may currently be open in Excel. Close it and try again."
+        return membership_list, error
+    ws = wb.worksheets[0]
+
+    for i,row in enumerate(ws.iter_rows(min_row=4, values_only=True)):
+        if all(x is None for x in row):
+            # 8/31/2026. row is blank, ignore.
+            continue
+        expiration_date = row[1]
+        last_name = row[2]
+        first_name = row[3]
+        email = row[10]
+        secondary_email = row[11]
+
+        if not expiration_date or not email:
+            print(f'BAD ROW -- i: {i}, row: {row}')
+            continue
+
+        if isinstance(expiration_date,str) and expiration_date == 'BOARD':
+            expiration_date = date(2100,1,1)
+        else:
+            try:
+                expiration_date = expiration_date.date()
+            except:
+                print(f'BAD ROW -- i: {i}, row: {row}')
+                continue
+
+        rmt = RacMembershipTup(expiration_date, last_name, first_name, email, secondary_email)
+        membership_list.append(rmt)
+
+    return membership_list, error
 
 if __name__ == "__main__":
     RAC_DIR()

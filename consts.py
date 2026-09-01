@@ -13,7 +13,8 @@ neafDatesTup = namedtuple('neafDatesTup','neaf_start neaf_end')
 NEAF_DATES = {2015:neafDatesTup('2015-04-18','2015-04-19'),2016:neafDatesTup('2016-04-09','2016-04-10'),2017:neafDatesTup('2017-04-08','2017-04-09'),
               2018:neafDatesTup('2018-04-21','2018-04-22'),2019:neafDatesTup('2019-04-06','2019-04-07'),2020:neafDatesTup('2020-04-04','2020-04-05'),
               2021:neafDatesTup('2021-04-10','2021-04-10'),2022:neafDatesTup('2022-04-09','2022-04-10'),2023:neafDatesTup('2023-04-15','2023-04-16'),
-              2024:neafDatesTup('2024-04-20','2024-04-21'),2025:neafDatesTup('2025-04-05','2025-04-06'),2026:neafDatesTup('2026-04-11','2026-04-12')} # 2026:neafDatesTup('2026-04-11','2026-04-12')}
+              2024:neafDatesTup('2024-04-20','2024-04-21'),2025:neafDatesTup('2025-04-05','2025-04-06'),2026:neafDatesTup('2026-04-11','2026-04-12'),
+              2027:neafDatesTup('2027-04-10','2027-04-11')}
 # any NEAF vendor products ordered in this range are for the 2 virtual NEAFs in 2020 and 2021
 VIRTUAL_NEAF_ORDER_RANGE = neafDatesTup('2020-03-01','2021-09-10')
 CREATED_AT_MIN_COVID = '2019-11-01'
@@ -34,8 +35,6 @@ NEAF_VENDOR = 'neaf_vendor'
 NEAF_FULL = 'neaf_full'
 NEAF_RAW = 'neaf_raw'
 NEAF_COMPANY_BADGE = 'neaf_company_badge'
-VALID_USER_INPUT_FILE = NEAF_VENDOR + '.xlsx'
-open_VALID_USER_INPUT_FILE = '~$'+VALID_USER_INPUT_FILE
 
 MEMBERSHIP = 'membership'
 DONATION = 'donation'
@@ -111,7 +110,8 @@ NEAF_YEAR_COVID = 'covid' # 2020 to 2023
 NEAF_YEAR_2024 = '2024'
 NEAF_YEAR_2025 = '2025'
 NEAF_YEAR_2026 = '2026'
-NEAF_YEAR_VALID = (NEAF_YEAR_ALL,NEAF_YEAR_2015,NEAF_YEAR_2016,NEAF_YEAR_2017,NEAF_YEAR_2018,NEAF_YEAR_2019,NEAF_YEAR_COVID,NEAF_YEAR_2024,NEAF_YEAR_2025,NEAF_YEAR_2026)
+NEAF_YEAR_2027 = '2027'
+NEAF_YEAR_VALID = (NEAF_YEAR_ALL,NEAF_YEAR_2015,NEAF_YEAR_2016,NEAF_YEAR_2017,NEAF_YEAR_2018,NEAF_YEAR_2019,NEAF_YEAR_COVID,NEAF_YEAR_2024,NEAF_YEAR_2025,NEAF_YEAR_2026,NEAF_YEAR_2027)
 
 # TODO 1/15/2022. starting with after NEAF 2024 change NEAF_YEAR_DEFAULT for neaf_year back to latest NEAF_YEAR_<year> to pick up current year.
 #  for now default of NEAF_YEAR_COVID means sum together all NEAF Vendors orders from 2020, 2021, 2022 and 2023.

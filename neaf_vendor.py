@@ -6,13 +6,13 @@ import tempfile
 import os
 import copy
 from consts import NEAF_VENDOR,NEAF_VENDOR,NEAF_FULL,NEAF_RAW,NEAF_COMPANY_BADGE,NEAF_YEAR_DEFAULT,REFUND,N_A
-from utils import get_date,NeafVendorCollectionsTup,show_dict,show_neaf_vendor_dict,NeafVendorTup,getCurrencySymbolFromCode
+from utils import get_date,NeafVendorCollectionsTup,show_dict,show_neaf_vendor_dict,NeafVendorTup,getCurrencySymbolFromCode,NEAF_VENDOR_FIELDS
 from utils import NeafSSTup,writerow_UnicodeEncodeError,RAC_DIR,ERROR,STARS,nvtDesc,NOTE_ATTRIBUTE_KEY,CUSTOM_ATTRIBUTES_KEY
 from neaf_vendor_utils import useOrderNoteAttributeEdits,getNamesFromOrderProperty,setAddress,setName,setCost,setOrderDetails,setOrderProperties,useNameFromAttribute
 from neaf_vendor_utils import addItemToNvtDict,set_vendor_properties_tup,mergeNvts,mergedDiscounts,getBadgeEntitledCntAndNames,removeBadgesFromRefundedOrders,applyBadgeNameEdits
 from neaf_vendor_utils import convert_neafVendorTup_to_processed,get_distinct_order_properties,item_count_description,build_address_text,normalize_big_string
 from neaf_vendor_utils import displayLargeStringWithMargin,dash_string,goodDatetimeStr,buildCompanyBadgeList,buildLastOrderDateVendorsMap,convertToKey,save_invoice,get_vendor_sign_in_row
-from neaf_vendor_utils import invoice_subdir,getNormalizedBadgeNames,updateOrderNoteAttributes,DONATION_SKU,EXCLUDE_SKU,appendError
+from neaf_vendor_utils import invoice_subdir,getNormalizedBadgeNames,updateOrderNoteAttributes,DONATION_SKU,EXCLUDE_SKU,appendError,appendError_and_replace_in_nvt_dict
 from neaf_vendor_utils import INCOMPATIBLE_ACTIONS,VALID_EDIT_ACTIONS,EDIT_ACTION_TO_ACTION_MAP,BADGE,DELETE_ORIGINAL_BADGE,EMAIL,DESC_FOR_ACTION_NEEDING_1_ORDER,DELETE_PRIOR_EDIT
 from neaf_vendor_utils import DELETE_ORIGINAL_BADGE_ACTION,DELETE_ORIGINAL_ORDER_NOTE,ORDER_NOTE,NAME
 from order_num_to_company import buildOrderNumToCompanyMap
@@ -48,16 +48,17 @@ class NEAFVendor(AccessShopify):
             #print 'xx'
             pass
 
-        (order_num,created_at,sku,quantity,CONFIRM_NOTE,\
-            name,address1,address2,address3,phone_num,\
-            email,booth_st_qty,booth_st,booth_prem_qty,booth_prem,upgrade_st_to_prem_qty,upgrade_st_to_prem,total_adj_booth_qty, get_booths_from,\
-            extra_tables_qty,extra_tables,extra_chairs_qty,extra_chairs,elec,carpet,additional_badges_qty,additional_badges,wifi,shipping_box,\
-            shipping_pallet,sponsorship,donation,declined_neaf_2023,prize_donation,prize_donation_value, \
-            currencyCode,total_cost,paid,total_due,\
-            check_number,total_discounts,iscount_codes,booth_comments,sales_comments,error,
-            total_cost_presentment,paid_presentment,total_due_presentment,total_discounts_presentment,\
-            shipping_box_qty,shipping_pallet_qty,order_note,debug,order_details,order_properties,\
-            badge_names_orig,badge_entitled_cnt,badge_names) = [None]*58
+        (order_num,created_at,sku,quantity,CONFIRM_NOTE,
+            name,address1,address2,address3,phone_num,
+            email,booth_st_qty,booth_st,booth_prem_qty,booth_prem,
+            upgrade_st_to_prem_qty,upgrade_st_to_prem,get_booths_from_order,sent_booths_to_orders,no_st_booths_from_order,no_pr_booths_from_order,
+            extra_tables_qty,extra_tables,extra_chairs_qty,extra_chairs,elec,carpet,additional_badges_qty,additional_badges,wifi,shipping_box,
+            shipping_pallet,sponsorship,donation,declined_neaf_2023,prize_donation,prize_donation_value,
+            currencyCode,total_cost,paid,total_due,
+            check_number,total_discounts,discount_codes,booth_comments,sales_comments,error,
+            total_cost_presentment,paid_presentment,total_due_presentment,total_discounts_presentment,
+            shipping_box_qty,shipping_pallet_qty,order_note,debug,order_details,order_properties,
+            badge_names_orig,badge_entitled_cnt,badge_names) = (None,) * 60
 
         order_num = sct.order_num
         # 12/27/2022. Bizzarely order_num is in there twice, 2nd time its orderNumber. that's the simplest way of getting it into the s/s in the current framework where s/s fields run
@@ -88,8 +89,12 @@ class NEAFVendor(AccessShopify):
         properties = sct.line_item.get(CUSTOM_ATTRIBUTES_KEY())
         nvpt = set_vendor_properties_tup(properties)
         #requested_booth_loc = nvpt.requested_booth_loc
-        if nvpt.get_booths_from:
-            get_booths_from = nvpt.get_booths_from
+        if nvpt.get_booths_from_order:
+            get_booths_from_order = nvpt.get_booths_from_order
+        if isinstance(nvpt.no_st_booths_from_order,int):
+            no_st_booths_from_order = nvpt.no_st_booths_from_order
+        if isinstance(nvpt.no_pr_booths_from_order,int):
+            no_pr_booths_from_order = nvpt.no_pr_booths_from_order
         if nvpt.prize1:
             prize_donation = nvpt.prize1
         if nvpt.prize2:
@@ -111,7 +116,8 @@ class NEAFVendor(AccessShopify):
                             nvpt.company_from_property, company_from_attribute,name_from_attribute,
 
                             company, last_order_date, orderNumber, name, address1, address2, address3, phone_num, nvpt.cellno,
-                            email, booth_st_qty, booth_st, booth_prem_qty, booth_prem, upgrade_st_to_prem_qty, upgrade_st_to_prem, total_adj_booth_qty, get_booths_from,
+                            email, booth_st_qty, booth_st, booth_prem_qty, booth_prem,
+                            upgrade_st_to_prem_qty, upgrade_st_to_prem, get_booths_from_order, sent_booths_to_orders, no_st_booths_from_order, no_pr_booths_from_order,
                             extra_tables_qty, extra_tables, extra_chairs_qty, extra_chairs, elec, carpet, additional_badges_qty, additional_badges, wifi, shipping_box,
                             shipping_pallet, sponsorship, donation, donation_order_from_attribute, exclude_order_from_attribute, declined_neaf_2023, prize_donation, prize_donation_value,
                             currencyCode, total_cost, paid, total_due, check_number, total_discounts, discount_codes, booth_comments, sales_comments, order_note, nvpt.error,
@@ -174,55 +180,178 @@ class NEAFVendor(AccessShopify):
 
         return full
 
-    def populateTotalAdjBoothQty(self,full):
+    def adjustBoothQuantitiesForTransfersAndUpgrades(self, full):
 
-        # TODO 3/18/2026. implement this function that error checks, calcs and sets NEAFVendorTup.total_adj_booth_qty. for the majority of companies this field is simply the sum of
-        #                 booth_st_qty and booth_prem_qty. upgrade_st_to_prem_qty does not contribute. set error if insufficient number of standard booths to upgrade.
-        #                 loop through full and find all target orders in get_booths_from. for now only the "Extra Spreadsheet Row" product with sku:neaf_vendor_booth_extra_ss_row uses
-        #                 get_booths_from. confirm those orders are real. confirm no duplicate orders used in get_booths_from inside a company.
-        #                 confirm sufficient booths in the get_booths_from order to divert to requesting order
-        #                 Some valid sample orders with get_booths_from:
-        #                    1) 17724 (Astro-Tech, quan:1) with get_booths_from of 17376 (Astronomics,    quan: stan:1, prem:3)
-        #                    2) 17728 (10 Micron,  quan:1) with get_booths_from of 17377 (Woodland Hills, quan: prem:2)
-        #                    3) 17729 (Sky Rover,  quan:1) with get_booths_from of 17376 (Astronomics,    quan: stan:1, prem:3)
-        #                 duplicates are allowed across companies since a single company with many booths can feed many "Extra Spreadsheet Row" companies.
+        # TODO 3/18/2026. implement this function that
+        #                 1) error checks. There's a whole shitload of error checks for get_from_order. see code below.
+        #                 2) adjusts nvt.booth_prem_qty and nvt.booth_st_qty if nvt.upgrade_st_to_prem_qty is not 0.
+        #                 3) transfer booths from a source company to a destination company that has get_booths_from_order set.
+        #                 .
+        #                 sample order that uses upgrade_st_to_prem_qty is for Spectrum Optical Instruments. original order is #17309 with 3 standard. upgrade 1 booth in #17712.
+        #                 set error if insufficient number of standard booths to upgrade.
+        #                 loop through full dict and find all target orders in get_booths_from_order. for now only the "Extra NEAF Vendor Management s/s Row" product
+        #                 with sku:neaf_vendor_booth_extra_ss_row uses get_booths_from_order.
+        #                 confirm those orders are real. confirm no duplicate orders used in get_booths_from_order inside a company.
+        #                 confirm sufficient booths in the get_booths_from_order order to divert to requesting order.
+        #                 Sample orders with get_booths_from_order:
+        #                    1) 19065 (Astro-Tech, quan:1) with get_booths_from_order of 17376 (Astronomics,    quan: stan:1, prem:3)
+        #                    2) 19066 (10 Micron,  quan:1) with get_booths_from_order of 17377 (Woodland Hills, quan: prem:2)
+        #                    3) 19067 (Sky Rover,  quan:1) with get_booths_from_order of 17376 (Astronomics,    quan: stan:1, prem:3)
+        #                 duplicates are allowed across companies since a single company with many booths can feed many "Extra NEAF Vendor Management s/s Row" companies.
+        #                 Sample orders for 'Spectrum Optical Instruments', 17309|17712 has 3 standard and 1 premium. it should be 2 standard and 2 premium when when
+        #                    neaf_vendor_booth_premium_from_standard_early_bird:1 applied.
 
-        # 4/2/2026. this block processes items in full dict that have nvt.get_booths_from set.
+        # 7/16/2026. this block processes upgrade_st_to_prem_qty.
 
-        full_adjusted = {}
-        get_booths_from_company_items = {}
         for company,nvt in full.items():
-            if nvt.get_booths_from:
-                if not nvt.get_booths_from.isdigit():
-                    nvt = appendError(nvt,f"get_booths_from:'{nvt.get_booths_from}' is invalid. It must be an integer.")
+            if nvt.upgrade_st_to_prem_qty:
+                if not nvt.booth_st_qty:
+                    error = f"company:{company} has upgrade_st_to_prem_qty:{nvt.upgrade_st_to_prem_qty} but has no standard booths."
+                    appendError_and_replace_in_nvt_dict(full,nvt,error)
+                    continue
+                if nvt.upgrade_st_to_prem_qty > nvt.booth_st_qty:
+                    error = f"company:{company} has upgrade_st_to_prem_qty:{nvt.upgrade_st_to_prem_qty} but only has booth_st_qty:{nvt.booth_st_qty} to be upgraded."
+                    appendError_and_replace_in_nvt_dict(full,nvt,error)
+                    continue
+                if not nvt.booth_prem_qty:
+                    nvt = nvt._replace(booth_prem_qty=nvt.upgrade_st_to_prem_qty)
                 else:
-                    # 4/2/2026: some orders that hit this block include 17724, 17728, 17729.
-                    get_booths_from = int(nvt.get_booths_from)
-                    get_booths_from_company = self.orderNumToCompanyMap.get(get_booths_from)
-                    if not get_booths_from_company:
-                        # 4/2/2026. no use case yet for this block. when one is found document it here.
-                        nvt = appendError(nvt,f"get_booths_from:{get_booths_from} is invalid. No company in NEAFVendor.orderNumToCompanyMap exists for this order_num.")
+                    nvt = nvt._replace(booth_prem_qty=nvt.booth_prem_qty + nvt.upgrade_st_to_prem_qty)
+                nvt = nvt._replace(booth_st_qty=nvt.booth_st_qty - nvt.upgrade_st_to_prem_qty)
+                full[company] = nvt
+
+        # 4/2/2026. this block processes items in full dict that have nvt.get_booths_from_order set.
+
+        gbfo_src_to_dsts_maps = {} # 7/14/2026. use this collection to map a single source of booths to a list of destination orders that get those booths
+        for company,nvt_dst in full.items():
+            if nvt_dst.get_booths_from_order:
+
+                # 4/2/2026: some orders that hit this block with nvt.get_booths_from_order include 19065, 19066, 19067.
+
+                # 7/13/2026. First do a whole crap load of error checking.
+
+                if not nvt_dst.get_booths_from_order.isdigit():
+                    appendError_and_replace_in_nvt_dict(full,nvt_dst,f"get_booths_from_order:'{nvt_dst.get_booths_from_order}' is invalid. It must be an integer.")
+                    continue
+                get_booths_from_order = int(nvt_dst.get_booths_from_order)
+                if len(nvt_dst.order_num.split('|')) != 1:
+                    error = f"Company:{company} with nvt.get_booths_from_order:'{nvt_dst.get_booths_from_order}' is invalid because it has nvt.order_num:{nvt_dst.order_num}. "\
+                             "which means this company is built from multiple orders. Any company that uses nvt.get_booths_from_order must be built from single order."
+                    appendError_and_replace_in_nvt_dict(full,nvt_dst,error)
+                    continue
+                if get_booths_from_order == int(nvt_dst.order_num):
+                    error = f"nvt.get_booths_from_order:'{nvt_dst.get_booths_from_order}' is invalid because nvt.order_num:{nvt_dst.order_num}. "\
+                             'nvt.get_booths_from_order cannot point back to itself.'
+                    appendError_and_replace_in_nvt_dict(full,nvt_dst,error)
+                    continue
+                company_src = self.orderNumToCompanyMap.get(get_booths_from_order)
+                if not company_src:
+                    error = f"get_booths_from_order:'{nvt_dst.get_booths_from_order}' expected to have entry in NEAFVendor.orderNumToCompanyMap dict but no entry exists."
+                    appendError_and_replace_in_nvt_dict(full,nvt_dst,error)
+                    continue
+                nvt_src = full.get(company_src)
+                if not nvt_src:
+                    error = f"get_booths_from_order:'{nvt_dst.get_booths_from_order}' has company:{company_src} but that company has no entry in full dict."
+                    appendError_and_replace_in_nvt_dict(full,nvt_dst,error)
+                    continue
+                no_st_booths_from_order = nvt_dst.no_st_booths_from_order
+                if not isinstance(no_st_booths_from_order,int):
+                    appendError_and_replace_in_nvt_dict(full,nvt_dst,f"no_st_booths_from_order:'{nvt_dst.no_st_booths_from_order} is invalid. Must be blank or number.")
+                    continue
+                no_pr_booths_from_order = nvt_dst.no_pr_booths_from_order
+                if not isinstance(no_pr_booths_from_order,int):
+                    appendError_and_replace_in_nvt_dict(full,nvt_dst,f"no_pr_booths_from_order:'{nvt_dst.no_pr_booths_from_order} is invalid. Must be blank or number.")
+                    continue
+                if (no_st_booths_from_order or no_pr_booths_from_order) and  no_st_booths_from_order + no_pr_booths_from_order != nvt_dst.quantity:
+                    error = f"no_st_booths_from_order:'{nvt_dst.no_st_booths_from_order} and no_pr_booths_from_order:'{nvt_dst.no_pr_booths_from_order} are invalid. " \
+                            f"They sum to {no_st_booths_from_order + no_pr_booths_from_order} which does not equal quantity:{nvt_dst.quantity}."
+                    appendError_and_replace_in_nvt_dict(full,nvt_dst,error)
+                    continue
+                if nvt_src.booth_st_qty and nvt_src.booth_prem_qty and not no_st_booths_from_order and not no_pr_booths_from_order:
+                    error = f"get_booths_from_order:'{nvt_dst.get_booths_from_order}' has company:{company_src} but that company has both booth_st_qty:{nvt_src.booth_st_qty} and "\
+                            f"booth_prem_qty:{nvt_src.booth_prem_qty}. However both no_st_booths_from_order and no_pr_booths_from_order are missing. At least one must exist."
+                    appendError_and_replace_in_nvt_dict(full,nvt_dst,error)
+                    continue
+
+                # 7/14/2026. we have found both source and destination of 'get booths from order' NEAFVendorTup items. save them for further processing
+
+                gbfo_dsts = gbfo_src_to_dsts_maps.get(company_src,[])
+                if not gbfo_dsts:
+                    gbfo_src_to_dsts_maps[company_src] = gbfo_dsts
+                gbfo_dsts.append(nvt_dst)
+
+        # 7/15/2026. confirm the source company has enough booths to transfer to destination companies
+
+        src_companys_to_remove = []
+        for company_src,gbfo_dsts in gbfo_src_to_dsts_maps.items():
+            nvt_src = full[company_src]
+            booth_st_qty_src = nvt_src.booth_st_qty if nvt_src.booth_st_qty else 0
+            booth_prem_qty_src = nvt_src.booth_prem_qty if nvt_src.booth_prem_qty else 0
+            st_cnt = 0
+            pr_cnt = 0
+            either_cnt = 0
+            companies_dst = []
+            for nvt_dst in gbfo_dsts:
+                companies_dst.append(nvt_dst.company)
+                if nvt_dst.no_pr_booths_from_order:
+                    pr_cnt += nvt_dst.no_pr_booths_from_order
+                if nvt_dst.no_st_booths_from_order:
+                    st_cnt += nvt_dst.no_st_booths_from_order
+                if not nvt_dst.no_st_booths_from_order and not nvt_dst.no_pr_booths_from_order:
+                    either_cnt += nvt_dst.quantity
+
+            companies_dst_str = ', '.join(companies_dst)
+            if st_cnt and st_cnt > booth_st_qty_src:
+                error = f"company:{company_src} has standard booths:{booth_st_qty_src} but the companies getting those standard booths of {companies_dst_str} of " \
+                      f"are requesting a total of {st_cnt}. Not enough standard booths available."
+                appendError_and_replace_in_nvt_dict(full,nvt_dst,error)
+                src_companys_to_remove.append(company_src)
+                continue
+            if pr_cnt and pr_cnt > booth_prem_qty_src:
+                error = f"company:{company_src} has premium booths:{booth_prem_qty_src} but the companies getting those premium booths of {companies_dst_str} of " \
+                      f"are requesting a total of {pr_cnt}. Not enough premium booths available."
+                appendError_and_replace_in_nvt_dict(full,nvt_dst,error)
+                src_companys_to_remove.append(company_src)
+                continue
+            tot_booth_cnt_src = booth_st_qty_src + booth_prem_qty_src
+            if either_cnt and either_cnt > tot_booth_cnt_src:
+                error = f"company:{company_src} has booth_st_qty:{booth_st_qty_src} + booth_prem_qty:{booth_prem_qty_src} of {tot_booth_cnt_src } but the companies getting " \
+                        f"those booths of {companies_dst_str} are requesting a total of {either_cnt}. Not enough booths available."
+                appendError_and_replace_in_nvt_dict(full,nvt_dst,error)
+                src_companys_to_remove.append(company_src)
+                continue
+
+        for src_company_to_remove in src_companys_to_remove:
+            del gbfo_src_to_dsts_maps[src_company_to_remove]
+
+        # 7/15/2026. we have completed all error checking. adjust booth_st_qty and booth_st_qty and booth_prem_qty for both source and destination companies and set
+        #            sent_booth_to_order to concatenated list of destination order.
+
+        for company_src,gbfo_dsts in gbfo_src_to_dsts_maps.items():
+            nvt_src = full[company_src]
+            booth_st_qty_src = nvt_src.booth_st_qty if nvt_src.booth_st_qty else 0
+            booth_prem_qty_src = nvt_src.booth_prem_qty if nvt_src.booth_prem_qty else 0
+            sent_booths_to_orders = '|'.join([n.order_num for n in gbfo_dsts])
+            for nvt_dst in gbfo_dsts:
+                booth_st_qty_dst = 0
+                booth_prem_qty_dst = 0
+                if nvt_dst.no_st_booths_from_order:
+                    booth_st_qty_dst = nvt_dst.no_st_booths_from_order
+                if nvt_dst.no_pr_booths_from_order:
+                    booth_prem_qty_dst = nvt_dst.no_pr_booths_from_order
+                if not nvt_dst.no_st_booths_from_order and not nvt_dst.no_pr_booths_from_order:
+                    # 7/16/2026. destination booth doesn't specify whether we get premium or standard booth from source booth. that means source booth
+                    #            must have only pure standard or premium.
+                    if booth_st_qty_src:
+                        booth_st_qty_dst = nvt_dst.quantity
                     else:
-                        gbfc_items = get_booths_from_company_items.get(get_booths_from_company,[])
-                        if not gbfc_items:
-                            get_booths_from_company_items[get_booths_from_company] = gbfc_items
-                        gbfc_item = (company,nvt.order_num,nvt.quantity)
-                        gbfc_items.append(gbfc_item)
-
-                full_adjusted[company] = nvt
-
-        if full_adjusted:
-            full.update(full_adjusted)
-
-        for company,nvt in full.items():
-            booth_st_qty = nvt.booth_st_qty if nvt.booth_st_qty else 0
-            booth_prem_qty = nvt.booth_prem_qty if nvt.booth_prem_qty else 0
-            tot_booth_qty = booth_st_qty + booth_prem_qty
-            upgrade_st_to_prem_qty = nvt.upgrade_st_to_prem_qty
-            total_adj_booth_qty = nvt.total_adj_booth_qty
-            get_booths_from = nvt.get_booths_from
-            get_booths_from_company = self.orderNumToCompanyMap.get(get_booths_from)
-
+                        booth_prem_qty_dst = nvt_dst.quantity
+                nvt_dst = nvt_dst._replace(booth_st_qty=booth_st_qty_dst,booth_prem_qty=booth_prem_qty_dst)
+                full[nvt_dst.company] = nvt_dst
+                booth_st_qty_src -= booth_st_qty_dst
+                booth_prem_qty_src -= booth_prem_qty_dst
+            nvt_src = nvt_src._replace(booth_st_qty=booth_st_qty_src,booth_prem_qty=booth_prem_qty_src,sent_booths_to_orders=sent_booths_to_orders)
+            full[company_src] = nvt_src
 
         return
 
@@ -310,7 +439,7 @@ class NEAFVendor(AccessShopify):
             invoice += '{0}BOOTH COMMENTS:\n'.format(margin)
             invoice += '{0}{1}\n\n'.format(margin,nvt.booth_comments)
 
-        order_detail_format = '{:4s}{:5s} {:16s} {:48s} {:8s} {:8s}\n'
+        order_detail_format = '{:4s}{:5s} {:16s} {:50s} {:8s} {:8s}\n'
         header1 = ('','Order','Order',    'SKU','Quantity','Unit')
         header2 = ('','No.',  'Date/Time','',   '',        'Price')
         header1 = order_detail_format.format(*header1)
@@ -377,23 +506,28 @@ class NEAFVendor(AccessShopify):
                 invoice += '{0}{1}\n'.format(margin,bname)
 
         if len(badge_names)<badge_entitled_cnt:
-            msg = '\n{0}You are entitled to {1} badge names but have requested only {2} badge names.\n'# +\
+            msg = '\n{0}You are entitled to {1} badge names but have requested only {2} badge names.\n'#\
             #"{0}Please place a free order for {3} additional badge names with 'Additional Badge beyond two included with Booth' $0 variant.\n"
             invoice += msg.format(margin,badge_entitled_cnt,len(badge_names)) # ,badge_entitled_cnt-len(badge_names))
         elif len(badge_names)>badge_entitled_cnt:
-            msg = '\n{0}You are entitled to {1} badge names but have requested {2} badge names.\n'+\
+            msg = '\n{0}You are entitled to {1} badge names but have requested {2} badge names.\n'\
             "{0}Please order {3} additional badge names with 'Additional Badge beyond two included with Booth' product.\n"
             invoice += msg.format(margin,badge_entitled_cnt,len(badge_names),len(badge_names)-badge_entitled_cnt)
 
         invoice += '\n'
+        values = str(nvt.prize_donation_value).split('|')
+        donations = str(nvt.prize_donation).split('|')
         if nvt.prize_donation or nvt.prize_donation_value:
             invoice += '{0}DONATION VALUE and DESCRIPTION\n'.format(margin)
             invoice += '{0}{1}\n'.format(margin,dash_string(30))
-            invoice += '{:4s}{:14s}     {:s}\n'.format(margin, str(nvt.prize_donation_value), str(nvt.prize_donation))
+
+            for value,donation in zip(values,donations):
+                invoice += '{:4s}{:<14s}     {:s}\n'.format(margin,value,donation)
+
             invoice += '\n'
 
-        if nvt.get_booths_from:
-            invoice += f'Booths in this order come from order #{nvt.get_booths_from}\n'
+        if nvt.get_booths_from_order:
+            invoice += f'Booths in this order come from order #{nvt.get_booths_from_order}\n'
 
         # this function only returns last_order_date for those customers requesting an invoice. It is used to run function that outputs
         # all invoices for customers that want only for customers whose last order beyond a given date
@@ -438,7 +572,7 @@ class NEAFVendor(AccessShopify):
         self.buildOrderNumToCompanyMap(self.raw)
         # build_neaf_vendor_full_dict_from_shopify build full from raw.
         full = self.build_neaf_vendor_full_dict_from_shopify(self.raw)
-        self.populateTotalAdjBoothQty(full)
+        self.adjustBoothQuantitiesForTransfersAndUpgrades(full)
 
         self.print_and_save('converted raw data dict of size {0} to full data dict of size {1}'.format(len(self.raw),len(full)))
         neaf_ss = self.build_neaf_vendor_processed_dict_from_full(full)
@@ -643,7 +777,7 @@ class NEAFVendor(AccessShopify):
         onlyNeedOrderNum = action_desc_tup[1]
 
         if len(order_nums) > 1:
-            msg = "There are {0} orders of {1} under this company. The 'Edit Action' of '{2}' has an invalid 'Edit Item' of '{3}'. " +\
+            msg = "There are {0} orders of {1} under this company. The 'Edit Action' of '{2}' has an invalid 'Edit Item' of '{3}'. "\
                   "It must be assigned to one of those orders by setting the 'Edit Item' like this:"
         else:
             msg = "There is {0} order of {1} under this company. The 'Edit Action' of '{2}' has an invalid 'Edit Item' of '{3}'. "

@@ -262,7 +262,7 @@ def getCompanyFromAttribute(companies, companyFromAttributeToOrderNumMap):
         order_num_str = 'order_num {0}'.format(order_nums[0]) if len(order_nums) == 1 else 'order_nums {0}'.format(','.join([str(o_n) for o_n in order_nums]))
         comment = "Use '{0}' from {1} because it is company name from order_note_attributes for {2}.".format(company, companies, order_num_str)
     else:
-        comment = 'it is not possible to pick one of {0} as best company name using companies from order note attributes.\n' + \
+        comment = 'it is not possible to pick one of {0} as best company name using companies from order note attributes.\n'\
                   'We can only do that if a single one of these companies had been set as an order note attribute but these companies were set as order note attributes in these orders:\n{1}'
         comment = comment.format(companies,companyFromAttributeDesc)
         error = True
@@ -448,25 +448,25 @@ def buildOrderNumToCompanyMap_for_extra_ss_rows(raw):
     ex_prefix = "Error caught in buildOrderNumToCompanyMap_for_extra_ss_rows.\n"
 
     for order_num,nvt in raw.items():
-        if not nvt.get_booths_from:
+        if not nvt.get_booths_from_order:
             continue
         order_num = int(order_num.strip())
         try:
-            get_booths_from = int(nvt.get_booths_from)
+            get_booths_from_order = int(nvt.get_booths_from_order)
         except ValueError:
-            error = f"{ex_prefix}order_num:{order_num}, nvt.get_booths_from:'{nvt.get_booths_from}' is not valid. Must be string in int form."
+            error = f"{ex_prefix}order_num:{order_num}, nvt.get_booths_from_order:'{nvt.get_booths_from_order}' is not valid. Must be string in int form."
             return orderNumToCompanyMap_for_extra_ss_rows,error
-        if nvt.get_booths_from not in raw:
-            error = f"{ex_prefix}order_num:{order_num}, nvt.get_booths_from:'{nvt.get_booths_from} is invalid. It is not in NEAFVendor.raw dict."
+        if nvt.get_booths_from_order not in raw:
+            error = f"{ex_prefix}order_num:{order_num}, nvt.get_booths_from_order:'{nvt.get_booths_from_order} is invalid. It is not in NEAFVendor.raw dict."
             return orderNumToCompanyMap_for_extra_ss_rows,error
-        if order_num == get_booths_from:
-            error = f"{ex_prefix}order_num:{order_num}, nvt.get_booths_from:'{nvt.get_booths_from} equals order_num. It must refer to other item in NEAFVendor.raw dict."
+        if order_num == get_booths_from_order:
+            error = f"{ex_prefix}order_num:{order_num}, nvt.get_booths_from_order:'{nvt.get_booths_from_order} equals order_num. It must refer to other item in NEAFVendor.raw dict."
             return orderNumToCompanyMap_for_extra_ss_rows,error
         if not nvt.company_from_property:
-            error = f"{ex_prefix}order_num:{order_num}, nvt.get_booths_from:'{nvt.get_booths_from} but nvt.company_from_property list is missing."
+            error = f"{ex_prefix}order_num:{order_num}, nvt.get_booths_from_order:'{nvt.get_booths_from_order} but nvt.company_from_property list is missing."
             return orderNumToCompanyMap_for_extra_ss_rows,error
         if len(nvt.company_from_property) != 1:
-            error = f"{ex_prefix}order_num:{order_num}, nvt.get_booths_from:{nvt.get_booths_from} but nvt.company_from_property:{nvt.company_from_property} must have len of 1."
+            error = f"{ex_prefix}order_num:{order_num}, nvt.get_booths_from_order:{nvt.get_booths_from_order} but nvt.company_from_property:{nvt.company_from_property} must have len of 1."
             return orderNumToCompanyMap_for_extra_ss_rows,error
         orderNumToCompanyMap_for_extra_ss_rows[order_num] = normalizeCompany(nvt.company_from_property[0])
 

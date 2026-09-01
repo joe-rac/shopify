@@ -62,7 +62,7 @@ class Credentials:
                             raise RuntimeError(Credentials.error)
 
             if len(credDict) != len(Credentials._ENVVARS):
-                Credentials.error = f"Number of distinct credentials loaded from {path} is {len(credDict)} but number of items in Credentials._ENVVARS is {len(Credentials._ENVVARS)}." +\
+                Credentials.error = f"Number of distinct credentials loaded from {path} is {len(credDict)} but number of items in Credentials._ENVVARS is {len(Credentials._ENVVARS)}."\
                     "\nThey must be equal."
                 raise RuntimeError(Credentials.error)
 
@@ -76,7 +76,7 @@ class Credentials:
             if missing:
                 cnt = len(Credentials._values)
                 Credentials._values.clear()
-                Credentials.error = f"Failed constructing Credentials object. Missing the following required credentials from file {path}:\n{', '.join(missing)}" +\
+                Credentials.error = f"Failed constructing Credentials object. Missing the following required credentials from file {path}:\n{', '.join(missing)}"\
                                     f"\nClearing out the {cnt} credentials that were successfully loaded."
                 raise RuntimeError(Credentials.error)
 

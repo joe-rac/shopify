@@ -1,11 +1,13 @@
 
 # valid sku keys
 from consts import MEMBERSHIP,DONATION,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAIC_ATTEND,RAD,HSP,HSP_RAFFLE,RLS,SSP,DOOR_PRIZE,MERCH,NEAF_VENDOR,ADMIN,ALL
-from consts import SHOP_NAME,ADMIN_API_VERSION,NEAF_YEAR_DEFAULT,SATURDAY
+from consts import SHOP_NAME,ADMIN_API_VERSION,NEAF_YEAR_DEFAULT,SATURDAY,NEAF_YEAR_2026
 from credentials import Credentials
 from orders import Orders
 from door_prize import DoorPrize
 from neaf_vendor import NEAFVendor
+from neaf_vendor_utils import save_invoice
+from utils import load_franks_rac_membership_spreadsheet
 
 import tracemalloc
 tracemalloc.start()
@@ -90,7 +92,7 @@ def accesshopify_by_date_range_and_sku(ind=8,):
 
     return
 
-def neafvendor_invoice_and_csv_from_orders(ind=12):
+def neafvendor_management_ss_and_invoices_to_console_from_orders(ind=12):
 
     from neaf_vendor import NEAFVendor
     neaf_year = '' # '2024'
@@ -124,15 +126,21 @@ def neafvendor_invoice_and_csv_from_orders(ind=12):
     # for 17712 original order of neaf_vendor_booth_premium_from_standard_early_bird but before "My Company Name" added. I editted email from hqu@spectrumoi.com to hincequ@gmail.com.
     # combine with 17309 for 'Spectrum Optical Instruments'
     order_to_debug = '17712|17309'
-    # #17377 of 'Khorovsky ent.inc dba Woodland hills camera', 2 premium booths. split into 2 companies with #17728, '10 Micron', neaf_vendor_booth_extra_ss_row
-    #order_to_debug = '17377|17728'
-    # #17376 of astronomics, 3 premium, 1 standard. split into 3 companies with #17729, Sky Rover and #17724 Astro-Tech, neaf_vendor_booth_extra_ss_row
-    #order_to_debug = '17729|17376|17724'
+    # #17377 of 'Khorovsky ent.inc dba Woodland hills camera', 2 premium booths. split into 2 companies with #19066, '10 Micron', neaf_vendor_booth_extra_ss_row
+    #order_to_debug = '17377|19066'
 
     #order_to_debug = '17376' # 3/13/2026. has shitty extra badge name parsing where I confuse ',' and '/n' delimeters. repair.
     #order_to_debug = '13712|13717|14138' # 3/17/2026. I deleted block in NEAFVendor.get_nv_collections about hack for 'Explore Scientific' vs. 'Explore Scientific LLC'.
     #                                      I confirm with this test that block not needed and 'Explore Scientific LLC' is chosen.
-    order_to_debug = '17729|17376|17724|17712|17309|17377|17728' # 3/13/2026. extra ss row and standard to premium upgrade. all effect total_adj_booth_qty.
+    #order_to_debug = '19067|17376|19065|17712|17309|17377|19066' # 3/13/2026. 19067|19065|19066 are extra ss rows. 17712 is upgrade to premium of standrad order in 17309.
+
+
+    # 7/8/2026. Spectrum Optical Instruments, it has 3 standard and 1 premium. it should be 2 standard and 2 premium when when neaf_vendor_booth_premium_from_standard_early_bird:1 applied.
+    #order_to_debug = '17712|17309'
+    # 7/9/2026. #17376 for astronomics, 3 premium, 1 standard. split into 3 companies with #19067, Sky Rover and #19065, Astro-Tech which both use sku neaf_vendor_booth_extra_ss_row.
+    #           #17377 for Woodland Hills, 2 premium. split into 2 companies with #19066, 10 Micron which uses sku neaf_vendor_booth_extra_ss_row.
+    order_to_debug = '19067|17376|19065|19066|17377|17712|17309'
+
 
     nv = NEAFVendor(neaf_year,created_at_min,created_at_max,order_to_debug,verbose)
     nv.shopifyLoad()
@@ -149,6 +157,21 @@ def neafvendor_invoice_and_csv_from_orders(ind=12):
                 print(delim + invoice)
                 delim = '****************************************************************************************************************************************************\n'
 
+    return
+
+def neafvendor_invoice(company_key='Celestron',neaf_year=NEAF_YEAR_2026,as_pdf=True):
+    nv = NEAFVendor(neaf_year=neaf_year)
+    nv.shopifyLoad()
+    if nv.error:
+        print(nv.error)
+        return
+    target_companies,target_companies_text = nv.get_target_companies(company_key)
+    if len(target_companies) != 1:
+        print(target_companies_text)
+        return
+    target_company, target_company_invoice = nv.get_target_company_invoice(target_companies, '1')
+    msg, subdir_path, fname = save_invoice(target_company,target_company_invoice,as_pdf=as_pdf)
+    print(msg)
     return
 
 def neafvendor_load(neaf_year=NEAF_YEAR_DEFAULT,verbose=False):
@@ -204,14 +227,23 @@ def tutorial_door_prize_constant_contact_only(neaf_year = NEAF_YEAR_DEFAULT,over
 
     return
 
+def tutorial_franks_spreadsheet(fname='C:\\Users\\jjmos\\OneDrive\\Desktop\\RAC AUGUST 2026 Membership.xlsx'):
+    membership_list,error = load_franks_rac_membership_spreadsheet(fname)
+    if error:
+        print(error)
+    return
+
+
 def main():
 
     # 3/2/2024. the 3 functions in this block has been tested as of this date
-    #neafvendor_invoice_and_csv_from_orders()
+    #neafvendor_management_ss_and_invoices_to_console_from_orders() # 8/31/2026. fix bug for Spectrum Optical were 3 standard + 1 premium and upgrade shows as 2 standard + 1 premium
+    #neafvendor_invoice() #  ('Spectrum Optical Instruments',as_pdf=False)
     #neafvendor_load()
     #accesshopify_by_date_range_and_sku()
     #tutorial_door_prize()
-    tutorial_door_prize_constant_contact_only()
+    #tutorial_door_prize_constant_contact_only()
+    tutorial_franks_spreadsheet()
 
     return
 main()

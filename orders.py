@@ -636,7 +636,7 @@ class Orders(object):
             neaic_last_order, file_with_neaic_last_order,error = self.get_latest_neaic_order_number()
             if error:
                 return error
-            msg_incremental='In neaic_attendee_dump_to_csv while running in incremental mode last order processed in prior run that built {0} was {1}.' +\
+            msg_incremental='In neaic_attendee_dump_to_csv while running in incremental mode last order processed in prior run that built {0} was {1}.'\
                 '\nBuild new csv file for all NEAIC orders beyond {1}.'
             msg_incremental = msg_incremental.format(file_with_neaic_last_order,neaic_last_order)
             print(msg_incremental)
@@ -822,8 +822,8 @@ class Orders(object):
             msg += msg1
 
         if skuMultipliersFound:
-            msg1 = '\n\n' + '*****************************************\n' + \
-                   'The following skus had their rows multiplied by these amounts: {0}\n' + \
+            msg1 = '\n\n' + '*****************************************\n'\
+                   'The following skus had their rows multiplied by these amounts: {0}\n'\
                     '*******************************************'
             msg1 = msg1.format(skuMultipliersFound)
             msg += msg1

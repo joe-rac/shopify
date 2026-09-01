@@ -220,7 +220,7 @@ def parse_constant_contact_date_filter_args(neaf_year, neaf_day):
     neaf_start_dow = neaf_start_date.strftime('%A')
     neaf_end_dow = neaf_end_date.strftime('%A')
     if neaf_day != DEFAULT_DAY and neaf_year == NEAF_YEAR_DEFAULT and (today == neaf_start_date or today == neaf_end_date):
-        msg_ex = f"{msg_front} neaf_year:{neaf_year} equals NEAF_YEAR_DEFAULT:{NEAF_YEAR_DEFAULT}, today:{today} is one of neaf_start:{neaf_start} or neaf_end:{neaf_end}.\n" + \
+        msg_ex = f"{msg_front} neaf_year:{neaf_year} equals NEAF_YEAR_DEFAULT:{NEAF_YEAR_DEFAULT}, today:{today} is one of neaf_start:{neaf_start} or neaf_end:{neaf_end}.\n"\
                  f"That means we are running live during NEAF. neaf_day:{neaf_day} is invalid during NEAF. It must be DEFAULT_DAY:{DEFAULT_DAY} and we use calendar day of week for neaf_day."
         return neaf_year_int,neaf_year_default_int,today,neaf_start,neaf_end,neaf_start_dow,neaf_end_dow,msg,msg_ex
 
@@ -228,11 +228,11 @@ def parse_constant_contact_date_filter_args(neaf_year, neaf_day):
     neaf_end_mon = neaf_start_date.strftime('%B')
     if neaf_year != NEAF_YEAR_DEFAULT:
         if neaf_start_mon != 'April' or neaf_end_mon != 'April':
-            msg_ex = f"{msg_front} neaf_start_mon:{neaf_start_mon}, neaf_end_mon:{neaf_end_mon} are invalid for neaf_year:{neaf_year}.\n" + \
+            msg_ex = f"{msg_front} neaf_start_mon:{neaf_start_mon}, neaf_end_mon:{neaf_end_mon} are invalid for neaf_year:{neaf_year}.\n"\
                      f"Only neaf_year of NEAF_YEAR_DEFAULT:{NEAF_YEAR_DEFAULT} can have NEAF days not in April and only for testing purposes."
             return neaf_year_int,neaf_year_default_int,today,neaf_start,neaf_end,neaf_start_dow,neaf_end_dow,msg,msg_ex
         if neaf_start_dow != SATURDAY or neaf_end_dow != SUNDAY:
-            msg_ex = f"{msg_front} neaf_start_dow:{neaf_start_dow}, neaf_end_dow:{neaf_end_dow} are invalid for neaf_year:{neaf_year}.\n" + \
+            msg_ex = f"{msg_front} neaf_start_dow:{neaf_start_dow}, neaf_end_dow:{neaf_end_dow} are invalid for neaf_year:{neaf_year}.\n"\
                      f"Only neaf_year of NEAF_YEAR_DEFAULT:{NEAF_YEAR_DEFAULT} can have NEAF days of week not on weekend and only for testing purposes."
             return neaf_year_int,neaf_year_default_int,today,neaf_start,neaf_end,neaf_start_dow,neaf_end_dow,msg,msg_ex
 
