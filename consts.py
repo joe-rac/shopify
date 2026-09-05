@@ -20,6 +20,9 @@ VIRTUAL_NEAF_ORDER_RANGE = neafDatesTup('2020-03-01','2021-09-10')
 CREATED_AT_MIN_COVID = '2019-11-01'
 CREATED_AT_MAX_COVID = '2023-06-01'
 
+hspDatesTup = namedtuple('hspDatesTup','hsp_start starbq hsp_end')
+HSP_DATES = {2025:hspDatesTup('2025-09-16','2025-09-20','2025-09-27'),2026:hspDatesTup('2026-09-09','2026-09-13','2026-09-17')}
+
 # these consts are informational only. They are used on Apps->Manage private apps->Private apps page of shopify admin website at https://rockland-astronomy-club.myshopify.com/admin/apps/private .
 # go there to set up new credentials
 PRIVATE_APP_NAME = 'py_scripts'
@@ -116,6 +119,11 @@ NEAF_YEAR_VALID = (NEAF_YEAR_ALL,NEAF_YEAR_2015,NEAF_YEAR_2016,NEAF_YEAR_2017,NE
 # TODO 1/15/2022. starting with after NEAF 2024 change NEAF_YEAR_DEFAULT for neaf_year back to latest NEAF_YEAR_<year> to pick up current year.
 #  for now default of NEAF_YEAR_COVID means sum together all NEAF Vendors orders from 2020, 2021, 2022 and 2023.
 NEAF_YEAR_DEFAULT = NEAF_YEAR_2026 # NEAF_YEAR_COVID
+
+HSP_YEAR_2025 = '2025'
+HSP_YEAR_2026 = '2026'
+HSP_YEAR_VALID = (HSP_YEAR_2025,HSP_YEAR_2026)
+HSP_YEAR_DEFAULT = HSP_YEAR_2026
 
 MISSING = 'MISSING'
 ERROR = 'ERROR'

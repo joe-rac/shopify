@@ -4,6 +4,7 @@ import faulthandler
 from neaf_vendor_ui import main as neaf_vendor_ui_main
 from door_prize_ui import main as door_prize_ui_main
 from orders_ui import main as orders_ui_main
+from hsp_attendees_ui import main as hsp_attendees_ui_main
 import tracemalloc
 
 def main():
@@ -20,6 +21,7 @@ def main():
         print('1: NEAF Vendor Management Tool')
         print('2: door prize app')
         print('3: orders app')
+        print('4: HSP attendees')
         optionstr = input('-----> ')
         if optionstr=='0':
             break
@@ -32,6 +34,9 @@ def main():
             break  
         if optionstr=='3':
             orders_ui_main(sys.argv)
+            break
+        if optionstr=='4':
+            hsp_attendees_ui_main(sys.argv)
             break
 
         print("Invalid entry. You're not too bright. Are you?")

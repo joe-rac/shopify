@@ -23,7 +23,7 @@ from collections import namedtuple
 from openpyxl import load_workbook
 
 import consts
-from consts import ERROR,MISSING,N_A,CURRENCY_SYMBOL_FROM_CODE
+from consts import MISSING,N_A,CURRENCY_SYMBOL_FROM_CODE
 eastern_zone = pytz.timezone("US/Eastern")
 utc_format = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -45,7 +45,7 @@ ORDER_DETAIL_FIELDS = 'created_at order_num sku name quantity unit_price unit_pr
 OrderDetailTup = namedtuple('OrderDetailTup', ORDER_DETAIL_FIELDS)
 ORDER_PROPERTIES_FIELDS = 'order_num names address1 address2 address3 phone_num email'
 OrderPropertiesTup = namedtuple('OrderPropertiesTup', ORDER_PROPERTIES_FIELDS)
-RAC_MEMBERSHIP_FIELDS = 'expiration_date last_name first_name email secondary_email'
+RAC_MEMBERSHIP_FIELDS = 'row expiration_date name last_name first_name email secondary_email'
 RacMembershipTup = namedtuple('RacMembershipTup', RAC_MEMBERSHIP_FIELDS)
 
 # XXX when changing NeafVendorTup make sure adjustments made to keys_to_be_summed and keys_to_be_merged in mergedNvts in neaf_vendor_utils.py .
@@ -657,44 +657,130 @@ def load_franks_rac_membership_spreadsheet(fname):
 
     # 8/31/2026. load Frank's membership s/s. Name of form 'RAC AUGUST 2026 Membership.xlsx'. Frank says he creates a s/s of the form once a month near end of month.
 
-    error = ''
     membership_list = []
+    email_to_rmt_list_map = {}
+    name_to_rmt_list_map = {}
+    error = ''
+    msg = ''
 
     try:
         wb = load_workbook(fname, data_only=True)
     except PermissionError:
         error = f"\nUnable to open membership spreadsheet:\n{fname}\n" \
                    "The spreadsheet may currently be open in Excel. Close it and try again."
-        return membership_list, error
+        return membership_list, email_to_rmt_list_map, name_to_rmt_list_map, error, msg
     ws = wb.worksheets[0]
 
-    for i,row in enumerate(ws.iter_rows(min_row=4, values_only=True)):
+    blank_rows = 0
+    secondary_email_cnt = 0
+    rejected_rows = 0
+    exp_in_past = 0
+    far_future = date(2100,1,1)
+    exp_dt_earliest = far_future
+    exp_dt_latest = date(1980,1,1)
+    today_date = datetime.datetime.now().date()
+
+    for row_num,row in enumerate(ws.iter_rows(min_row=4, values_only=True)):
+        row_num += 4
         if all(x is None for x in row):
             # 8/31/2026. row is blank, ignore.
+            blank_rows += 1
             continue
         expiration_date = row[1]
-        last_name = row[2]
-        first_name = row[3]
-        email = row[10]
-        secondary_email = row[11]
+        last_name = '' if row[2] is None else row[2].strip()
+        first_name = '' if row[3] is None else row[3].strip()
+        email = '' if row[10] is None else row[10].strip()
+        secondary_email = '' if row[11] is None else row[11].strip()
 
         if not expiration_date or not email:
-            print(f'BAD ROW -- i: {i}, row: {row}')
+            rejected_rows += 1
+            print(f'BAD ROW -- i: {row_num}, Either expiration_date or email is missing. row: {row}')
             continue
 
         if isinstance(expiration_date,str) and expiration_date == 'BOARD':
-            expiration_date = date(2100,1,1)
+            expiration_date = far_future
         else:
             try:
                 expiration_date = expiration_date.date()
             except:
-                print(f'BAD ROW -- i: {i}, row: {row}')
+                rejected_rows += 1
+                print(f'BAD ROW -- i: {row_num}, Expiration date not in date form. row: {row}')
                 continue
 
-        rmt = RacMembershipTup(expiration_date, last_name, first_name, email, secondary_email)
+        if not first_name or not last_name:
+            rejected_rows += 1
+            print(f'BAD ROW -- i: {row_num}, Either first_name or last_name is missing. row: {row}')
+            continue
+        name = first_name + ' ' + last_name
+
+        if expiration_date < today_date:
+            exp_in_past += 1
+        if expiration_date < exp_dt_earliest:
+            exp_dt_earliest = expiration_date
+        if expiration_date > exp_dt_latest and expiration_date != far_future:
+            exp_dt_latest = expiration_date
+
+        rmt = RacMembershipTup(row_num,expiration_date,name,last_name,first_name,email,secondary_email)
         membership_list.append(rmt)
 
-    return membership_list, error
+        key = email.lower()
+        rmt_list = email_to_rmt_list_map.get(key,[])
+        if not rmt_list:
+            email_to_rmt_list_map[key] = rmt_list
+        rmt_list.append(rmt)
+
+        if secondary_email:
+            key_secondary = secondary_email.lower()
+            if key_secondary != key:
+                secondary_email_cnt += 1
+                rmt_list = email_to_rmt_list_map.get(key_secondary,[])
+                if not rmt_list:
+                    email_to_rmt_list_map[key_secondary] = rmt_list
+                rmt_list.append(rmt)
+
+        key = name.lower()
+        rmt_list = name_to_rmt_list_map.get(key,[])
+        if not rmt_list:
+            name_to_rmt_list_map[key] = rmt_list
+        rmt_list.append(rmt)
+
+    email_to_rmt_list_multiple_map = {}
+    for k,v in email_to_rmt_list_map.items():
+        if len(v) > 1:
+            email_to_rmt_list_multiple_map[k] = v
+    name_to_rmt_list_multiple_map = {}
+    for k,v in name_to_rmt_list_map.items():
+        if len(v) > 1:
+            name_to_rmt_list_multiple_map[k] = v
+
+    if name_to_rmt_list_multiple_map:
+        print('\nNames appearing mutiple times in membership s/s:')
+        i = 0
+        for k,v in name_to_rmt_list_multiple_map.items():
+            i += 1
+            print(f'{i}) {k}:')
+            for rmt in v:
+                rmts = f"row={rmt.row}, expiration_date={rmt.expiration_date}, name='{rmt.name}', last_name='{rmt.last_name}', first_name='{rmt.first_name}', email='{rmt.email}'," \
+                       f" secondary_email='{rmt.secondary_email}'"
+                print(rmts)
+
+    if email_to_rmt_list_multiple_map:
+        print('\nemails appearing mutiple times in membership s/s:')
+        i = 0
+        for k,v in email_to_rmt_list_multiple_map.items():
+            i += 1
+            print(f'{i}) {k}:')
+            for rmt in v:
+                rmts = f"row={rmt.row}, expiration_date={rmt.expiration_date}, name='{rmt.name}', last_name='{rmt.last_name}', first_name='{rmt.first_name}', email='{rmt.email}',"\
+                       f" secondary_email='{rmt.secondary_email}'"
+                print(rmts)
+
+    msg += f"Loaded membership data from {fname}. len(membership_list):{len(membership_list)}, Rows in s/s:{row_num}, blank_rows:{blank_rows}, rejected_rows:{rejected_rows}.\n"
+    msg += f"exp_dt_earliest:{exp_dt_earliest}, exp_dt_latest:{exp_dt_latest}. # of expirations before today:{exp_in_past}.\n"
+    msg += f"secondary_email_cnt:{secondary_email_cnt}, # emails with multiple rows:{len(email_to_rmt_list_multiple_map)}, # names with multiple rows:{len(name_to_rmt_list_multiple_map)}\n"
+    msg += f"# of distinct names:{len(name_to_rmt_list_map)}, # distinct emails:{len(email_to_rmt_list_map)}\n"
+
+    return membership_list, email_to_rmt_list_map, name_to_rmt_list_map, error, msg
 
 if __name__ == "__main__":
     RAC_DIR()

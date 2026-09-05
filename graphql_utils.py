@@ -95,7 +95,7 @@ def load_and_adjust_custom_attributes(order_num,key,value=None,delete_key=False)
 
     errors = rd.get('errors')
     if errors:
-        msg = msg = appendMsg(msg,f'success:{success}, order_id:{order_id}',print_new_msg=False)
+        msg = appendMsg(msg,f'success:{success}, order_id:{order_id}',print_new_msg=False)
         msg = appendMsg(msg,f'GraphQL errors:\n{pprint.pformat(errors, width=200)}',print_new_msg=False)
         return msg,order_id,success,customAttributes
 

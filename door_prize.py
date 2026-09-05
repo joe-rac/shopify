@@ -6,7 +6,7 @@ import tracemalloc
 from consts import NEAF_DATES,DOOR_PRIZE,DEFAULT_DAY,SATURDAY,SUNDAY,NEAF_YEAR_DEFAULT,MISSING
 from utils import RAC_DIR,build_door_prize_cc_dict,DICT_DELIMITER_FRONT
 from utils import show_dict,read_door_prize_file,DOOR_PRIZE_HEADER,write_door_prize_file,DoorPrizeSrcDicts,DoorPrizeResDicts
-from utils import show_paths_and_files_dp,DOOR_PRIZE_WINNER,DoorPrizeTup,ERROR
+from utils import show_paths_and_files_dp,DOOR_PRIZE_WINNER,DoorPrizeTup
 from date_filter_utils import calc_date_items_from_neaf_year_and_day
 from graphql_utils import get_url_and_headers
 from pdf_utils import build_winners_pdf

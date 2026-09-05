@@ -1,11 +1,12 @@
 
 # valid sku keys
 from consts import MEMBERSHIP,DONATION,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAIC_ATTEND,RAD,HSP,HSP_RAFFLE,RLS,SSP,DOOR_PRIZE,MERCH,NEAF_VENDOR,ADMIN,ALL
-from consts import SHOP_NAME,ADMIN_API_VERSION,NEAF_YEAR_DEFAULT,SATURDAY,NEAF_YEAR_2026
+from consts import SHOP_NAME,ADMIN_API_VERSION,NEAF_YEAR_DEFAULT,SATURDAY,NEAF_YEAR_2026,HSP_YEAR_DEFAULT
 from credentials import Credentials
 from orders import Orders
 from door_prize import DoorPrize
 from neaf_vendor import NEAFVendor
+from hsp_attendees import HSPAttendees
 from neaf_vendor_utils import save_invoice
 from utils import load_franks_rac_membership_spreadsheet
 
@@ -228,11 +229,29 @@ def tutorial_door_prize_constant_contact_only(neaf_year = NEAF_YEAR_DEFAULT,over
     return
 
 def tutorial_franks_spreadsheet(fname='C:\\Users\\jjmos\\OneDrive\\Desktop\\RAC AUGUST 2026 Membership.xlsx'):
-    membership_list,error = load_franks_rac_membership_spreadsheet(fname)
+    membership_dict,email_to_rmt_list_map,name_to_rmt_list_map,error,msg = load_franks_rac_membership_spreadsheet(fname)
     if error:
-        print(error)
+        print(f'ERROR:\n{error}')
+    print(f'MSG:\n{msg}')
     return
 
+def hspattendee_load(hsp_year=HSP_YEAR_DEFAULT):
+
+    ha = HSPAttendees(hsp_year)
+    if ha.error:
+        print(ha.error + '\n' + ha.msg)
+        return
+    ha.shopifyAndFranksSpreadsheetLoad()
+
+    if ha.error:
+        print('\n-----------------ERROR----------------\n' + ha.error)
+    print('\n---------------------------------\n' + ha.msg + '\n---------------------------------\n')
+
+    ha.buildAndDisplaySales()
+    if ha.error:
+        print('\n-----------------ERROR----------------\n' + ha.error)
+
+    return
 
 def main():
 
@@ -243,7 +262,8 @@ def main():
     #accesshopify_by_date_range_and_sku()
     #tutorial_door_prize()
     #tutorial_door_prize_constant_contact_only()
-    tutorial_franks_spreadsheet()
+    #tutorial_franks_spreadsheet()
+    hspattendee_load()
 
     return
 main()
