@@ -89,7 +89,8 @@ def show_ShopifyCommonTup_list(sctList):
         name_max = get_max_len(v.name, name_max)
         company_max = get_max_len(get_company(li),company_max)
         email_max = get_max_len(v.email,email_max)
-        sku_max = get_max_len(li['sku'], sku_max)
+        # 8/9/2026. add str(li['sku']) for order #7379 for test order from Sarah which had sku of None.
+        sku_max = get_max_len(str(li['sku']), sku_max)
         dc_max = get_max_len(v.discount_codes, dc_max)
         d_max = get_max_len(round(v.discount_allocations), dc_max)
         q_str = str(v.quantity) + '/' + str(li['quantity'])
@@ -126,9 +127,16 @@ def show_ShopifyCommonTup_list(sctList):
         note = v.note[:43] + '...' if len(v.note) > 42 else v.note
         na_str = get_note_attributes(v)
         refund_note = v.refund_note.replace('\n', ' ')
+        # 8/9/2026. add str(li['sku']) for order #7379 for test order from Sarah which had sku of None.
+        sku = str(li['sku'])
 
-        msg = fmt.format(str(cnt),v.order_num,ca_str,v.name,get_company(li),str(v.email),li['sku'],v.discount_codes,da_str,q_str,cq_str,p_str,note,na_str,v.refund_created_at,refund_note)
-        msgs.append(msg)
+        try:
+            msg = fmt.format(str(cnt),v.order_num,ca_str,v.name,get_company(li),str(v.email),sku,v.discount_codes,da_str,q_str,cq_str,p_str,note,na_str,v.refund_created_at,refund_note)
+        except:
+            ex = f"In show_ShopifyCommonTup_list exception raised when processing sctList of sixe {len(sctList)}, item {cnt} for order:{v.order_num}, created at:{ca_str}, name:{v.name}"
+            raise Exception(ex)
+        else:
+            msgs.append(msg)
 
     desc = '\n'.join(msgs)
 

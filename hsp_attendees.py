@@ -11,7 +11,7 @@ from consts import HSP_YEAR_DEFAULT,HSP,HSP_DATES,MEMBERSHIP,MISSING
 from utils import load_franks_rac_membership_spreadsheet,appendMsg
 from orders import Orders
 
-HSP_ATTENDEE_FIELDS = 'name email expiration_date contribution starbq cabin raffle prv_tent platform order_nums comment'
+HSP_ATTENDEE_FIELDS = 'name first_name last_name email expiration_date contribution starbq cabin raffle prv_tent platform order_nums created_at_latest comment'
 HspAttendeeTup = namedtuple('HspAttendeeTup', HSP_ATTENDEE_FIELDS)
 
 class HSPAttendees(object):
@@ -92,7 +92,7 @@ class HSPAttendees(object):
         ws.append(HspAttendeeTup._fields)
         ws.freeze_panes = 'A2'
 
-        for hat in self.hat_list:
+        for hat in sorted(self.hat_list,key=lambda hat: hat.created_at_latest,reverse=True):
             ws.append(hat)
 
         for row in ws.iter_rows():
@@ -170,6 +170,8 @@ class HSPAttendees(object):
                 expiration_date = MISSING
 
             name = owpt_list[0].name
+            first_name = owpt_list[0].first_name
+            last_name = owpt_list[0].last_name
             email = owpt_list[0].email
             contribution = 0
             starbq = 0
@@ -184,6 +186,7 @@ class HSPAttendees(object):
             prv_tent_dollars = 0
             platform_dollars = 0
             order_nums = ''
+            created_at_latest = ''
 
             comment = ''
             found_attendee = False
@@ -198,6 +201,12 @@ class HSPAttendees(object):
                 else:
                     if onum not in order_nums.split('|'):
                         order_nums += '|' + onum
+
+                if not created_at_latest:
+                    created_at_latest = owpt.created_at
+                else:
+                    if owpt.created_at > created_at_latest:
+                        created_at_latest = owpt.created_at
 
                 if owpt.name not in name.split('|'):
                     name += '|' + owpt.name
@@ -245,7 +254,7 @@ class HSPAttendees(object):
             self.prv_tent_total_dollars += prv_tent_dollars
             self.platform_total += platform
             self.platform_total_dollars += platform_dollars
-            self.hat_list.append(HspAttendeeTup(name,email,expiration_date,contribution,starbq,cabin,raffle,prv_tent,platform,order_nums,comment))
+            self.hat_list.append(HspAttendeeTup(name,first_name,last_name,email,expiration_date,contribution,starbq,cabin,raffle,prv_tent,platform,order_nums,created_at_latest,comment))
 
         self.total_dollars = self.contribution_total_dollars + self.starbq_total_dollars + self.raffle_total_dollars + self.cabin_total_dollars + self.prv_tent_total_dollars + \
                              self.platform_total_dollars

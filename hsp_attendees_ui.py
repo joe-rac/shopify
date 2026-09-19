@@ -19,7 +19,7 @@ class HSPAttendeesUI(Frame):
         self.next_column = 0
         self.hsp_year_entry = HSP_YEAR_DEFAULT
         master.title('HSP Attendees')
-        master.geometry('1425x525' if self.width >=1900 else '1000x350')
+        master.geometry('1235x550')
         Frame.__init__(self,master)
         self.grid()
         self._create_widgets()
@@ -43,7 +43,7 @@ class HSPAttendeesUI(Frame):
         self.l0 = Label(self,text='HSP Attendees')
         self.l0.grid()
 
-        width = 100 if self.width >= 1900 else 80
+        width = 87
         vert_frame1 = STFrame(self,width,1)
         STButton(vert_frame1, text="SHOPIFY AND FRANK'S S/S LOAD (must do this first)", command=self.ShopifyAndFranksSpreadsheetLoad, same_row=True)
         STWidgetDropDown(vert_frame1,'HSP year: %5s',HSP_YEAR_VALID,default_value=HSP_YEAR_DEFAULT,command=self.HSPYearEntry,same_row=True)
@@ -51,7 +51,7 @@ class HSPAttendeesUI(Frame):
         self.order_to_debug = STWidget(vert_frame1, 'order_to_debug:', width=6, same_row=True)
         self.verbose = STWidget(vert_frame1, 'verbose', check_box=True, width=1, same_row=True)
 
-        self.large_res = STLargeResult(self,30,2 * width)
+        self.large_res = STLargeResult(self,34,2 * width)
 
         return
 

@@ -2,13 +2,14 @@
 # valid sku keys
 from consts import MEMBERSHIP,DONATION,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAIC_ATTEND,RAD,HSP,HSP_RAFFLE,RLS,SSP,DOOR_PRIZE,MERCH,NEAF_VENDOR,ADMIN,ALL
 from consts import SHOP_NAME,ADMIN_API_VERSION,NEAF_YEAR_DEFAULT,SATURDAY,NEAF_YEAR_2026,HSP_YEAR_DEFAULT
+from utils import load_franks_rac_membership_spreadsheet
 from credentials import Credentials
 from orders import Orders
 from door_prize import DoorPrize
 from neaf_vendor import NEAFVendor
 from hsp_attendees import HSPAttendees
 from neaf_vendor_utils import save_invoice
-from utils import load_franks_rac_membership_spreadsheet
+from customer_orders import CustomerOrders
 
 import tracemalloc
 tracemalloc.start()
@@ -253,6 +254,13 @@ def hspattendee_load(hsp_year=HSP_YEAR_DEFAULT):
 
     return
 
+def customer_orders(cust_str):
+
+    co = CustomerOrders()
+    co.loadOrdersForCustomer(cust_str)
+    co.displayLineItems()
+    return
+
 def main():
 
     # 3/2/2024. the 3 functions in this block has been tested as of this date
@@ -264,7 +272,9 @@ def main():
     #tutorial_door_prize_constant_contact_only()
     #tutorial_franks_spreadsheet()
     hspattendee_load()
+    #customer_orders('colker')  # 'mulder'
 
     return
+
 main()
 

@@ -134,7 +134,7 @@ ORDERS_BETWEEN_DATES = """
 
 ORDER_BY_NAME = """
 {
-  orders(query: "name:#ORDER_NUM",first: 10, ) {
+  orders(query: "name:#ORDER_NUM",first: 100, ) {
     edges {
       node {
         INSERT_ORDER_DETAILS_HERE
@@ -202,6 +202,31 @@ ORDER_ID_AND_NOTE_ATTRIBUTES = """
         }
       }
     }  
+  }
+}
+"""
+
+CUSTOMER_SEARCH_WITH_ORDERS = """
+query CustomerSearchWithOrders($search: String!) {
+  customers(first: 200, query: $search) {
+    nodes {
+      displayName
+      email
+      phone
+      defaultAddress {
+        address1
+        address2
+        city
+        province
+        zip
+        country
+      }
+      orders(first: 200) {
+        nodes {
+          name
+        }
+      }
+    }
   }
 }
 """

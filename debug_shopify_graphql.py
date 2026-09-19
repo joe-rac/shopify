@@ -4,7 +4,7 @@ import pprint
 from datetime import datetime,timedelta
 from dateutil import parser
 from consts import NEAF_VENDOR,FAKE_TEST_KEY,FAKE_TEST_VALUE
-from graphql_queries import ORDER_DETAILS,ORDER_BY_ORDER_ID,ORDERS_BY_SKU_BETWEEN_DATES,ORDER_BY_NAME,ORDERS_BETWEEN_DATES
+from graphql_queries import ORDER_DETAILS,ORDER_BY_ORDER_ID,ORDERS_BY_SKU_BETWEEN_DATES,ORDER_BY_NAME,ORDERS_BETWEEN_DATES,CUSTOMER_SEARCH_WITH_ORDERS
 from graphql_utils import get_orders_cursor_items,get_url_and_headers,load_and_adjust_custom_attributes,mutate_custom_attributes
 
 '''
@@ -160,8 +160,11 @@ def main():
     # 4/2/2026. inject non-conforming customAttribute of {'key': 'fake_test_key', 'value': 'fake_test_value'}
     #inject_test_custom_attribute_by_order_num()
     # 4/2/2026. delete fake badge edit {'key': 'Badge_Name_15264_4', 'value': 'Moshe Yisroel'}.
-    inject_test_custom_attribute_by_order_num(key='Badge_Name_15264_4',value=None,delete_key=True)
+    # inject_test_custom_attribute_by_order_num(key='Badge_Name_15264_4',value=None,delete_key=True)
+    get_order_nums_from_customer_search()
     return
+
+
 
 main()
 

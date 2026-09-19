@@ -5,7 +5,7 @@ import json
 import requests
 import pprint
 from consts import SHOP_NAME,ADMIN_API_VERSION
-from graphql_queries import MUTATE_CUSTOM_ATTRIBUTES,ORDER_ID_AND_NOTE_ATTRIBUTES
+from graphql_queries import MUTATE_CUSTOM_ATTRIBUTES,ORDER_ID_AND_NOTE_ATTRIBUTES,CUSTOMER_SEARCH_WITH_ORDERS
 from utils import appendMsg
 from credentials import Credentials
 
@@ -178,3 +178,36 @@ def mutate_custom_attributes(order_num, order_id, customAttributes):
         vstr = pprint.pformat(variables, width=200)
         msg = f'\nSuccessfully updated customAttributes for order_num:{order_num} at\n{req}\nwith data\n{vstr}\n'
     return True,msg
+
+def graphql_query(gql,variables=None):
+
+    url,headers = get_url_and_headers()
+
+    if variables is None:
+        response = requests.post(url,data=gql,headers=headers)
+    else:
+        headers['Content-Type'] = 'application/json'
+        response = requests.post(url,json={'query':gql,'variables':variables},headers=headers)
+
+    response.raise_for_status()
+    rd = response.json()
+
+    if rd.get('errors'):
+        raise RuntimeError(f"GraphQL errors:\n{pprint.pformat(rd['errors'],width=200)}")
+
+    return rd['data']
+
+def get_order_nums_from_customer_search(cust_str):
+
+    variables = {'search':cust_str}
+    data = graphql_query(CUSTOMER_SEARCH_WITH_ORDERS,variables)
+    customers = data['customers']['nodes']
+
+    order_nums = []
+    for customer in customers:
+        for order in customer['orders']['nodes']:
+            order_num = order['name'].lstrip('#')
+            if order_num not in order_nums:
+                order_nums.append(order_num)
+
+    return order_nums,customers

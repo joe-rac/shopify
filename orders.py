@@ -169,6 +169,12 @@ class Orders(object):
         self.order_keys = []
         self.refundNotes = []
 
+        if order_to_debug:
+            num_orders_to_debug = len(order_to_debug.split('|'))
+            if num_orders_to_debug > 100:
+                self.error = f'In Order.__init__ there are {num_orders_to_debug} orders in order_to_debug arg. Max allowed is 100 because limit in ORDER_BY_NAME graphql query is 100.'
+                return
+
         return
 
     def get_row(self,item_fields,item):
@@ -815,11 +821,14 @@ class Orders(object):
         if door_prize_winners_msg:
             msg += '\n' + door_prize_winners_msg
         else:
-            winner_ind = random.randint(0,rowCnt-1)
-            winner = mrows[winner_ind]
-            msg1 = '\nThe randomly selected row is item {0} in csv, order_num:{1}, name:{2}, email:{3}. created_at:{4}, sku:{5}'
-            msg1 = msg1.format(winner_ind+1,winner[0],winner[4],winner[9],winner[3],winner[13])
-            msg += msg1
+            winner_inds = random.sample(range(rowCnt),3)
+            msg += '\n'
+            for prize_rank,winner_ind in enumerate(winner_inds):
+                winner = mrows[winner_ind]
+                msg1 = f'\nPrize #{prize_rank+1} randomly selected row is order:{winner_ind+1} in csv, order_num:{winner[0]}, name:{winner[4]}, email:{winner[12]}, '\
+                    f'phone:{winner[11]}, created_at:{winner[3]}, sku:{winner[13]}'
+                msg += msg1
+            msg += '\n'
 
         if skuMultipliersFound:
             msg1 = '\n\n' + '*****************************************\n'\
