@@ -754,7 +754,7 @@ def load_franks_rac_membership_spreadsheet(fname):
             name_to_rmt_list_multiple_map[k] = v
 
     if name_to_rmt_list_multiple_map:
-        print('\nNames appearing mutiple times in membership s/s:')
+        print('\nNames appearing multiple times in membership s/s:')
         i = 0
         for k,v in name_to_rmt_list_multiple_map.items():
             i += 1
@@ -765,7 +765,7 @@ def load_franks_rac_membership_spreadsheet(fname):
                 print(rmts)
 
     if email_to_rmt_list_multiple_map:
-        print('\nemails appearing mutiple times in membership s/s:')
+        print('\nemails appearing multiple times in membership s/s:')
         i = 0
         for k,v in email_to_rmt_list_multiple_map.items():
             i += 1

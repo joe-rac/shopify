@@ -246,11 +246,33 @@ def hspattendee_load(hsp_year=HSP_YEAR_DEFAULT):
 
     if ha.error:
         print('\n-----------------ERROR----------------\n' + ha.error)
+        return
     print('\n---------------------------------\n' + ha.msg + '\n---------------------------------\n')
 
-    ha.buildAndDisplaySales()
+    error = ha.buildAndDisplaySales()
+    if error:
+        print('\n-----------------ERROR----------------\n' + error)
+        return
+
+    return
+
+def hsp_raffle_winners(hsp_year=HSP_YEAR_DEFAULT):
+    ha = HSPAttendees(hsp_year)
+    if ha.error:
+        print(ha.error + '\n' + ha.msg)
+        return
+    ha.shopifyAndFranksSpreadsheetLoad()
+
     if ha.error:
         print('\n-----------------ERROR----------------\n' + ha.error)
+        return
+    print('\n---------------------------------\n' + ha.msg + '\n---------------------------------\n')
+
+    msg,error = ha.pick_raffle_winners()
+    if error:
+        print('\n-----------------ERROR----------------\n' + error)
+        return
+    print(msg)
 
     return
 
@@ -271,7 +293,8 @@ def main():
     #tutorial_door_prize()
     #tutorial_door_prize_constant_contact_only()
     #tutorial_franks_spreadsheet()
-    hspattendee_load()
+    #hspattendee_load()
+    hsp_raffle_winners()
     #customer_orders('colker')  # 'mulder'
 
     return

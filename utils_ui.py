@@ -59,7 +59,7 @@ class STWidgetDropDown(OptionMenu):
         return res 
 
 class STWidget(Frame):
-    def __init__(self,master,label,width=None,check_box=False,same_row=False):
+    def __init__(self,master,label,width=None,check_box=False,default_value=None,same_row=False):
         Frame.__init__(self,master)
         if check_box:
             self.val = IntVar(self)
@@ -69,6 +69,8 @@ class STWidget(Frame):
             self.entry = None
         else: 
             self.val = StringVar(self)
+            if default_value is not None:
+                self.val.set(default_value)
             self.label = Label(self,text=label)
             self. label.grid(row=1,column=0) 
             self.entry = Entry(self,width=width,textvariable=self.val) 

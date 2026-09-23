@@ -3,7 +3,7 @@ from utils import build_startup_parameters
 from utils_ui import STButton,STLargeResult,STWidget,STFrame,STWidgetDropDown
 from hsp_attendees import HSPAttendees
 
-from consts import HSP_YEAR_DEFAULT,HSP_YEAR_VALID
+from consts import HSP_YEAR_DEFAULT,HSP_YEAR_VALID,DEFAULT_NUM_HSP_RAFFLE_WINNERS
 
 class HSPAttendeesUI(Frame):
     def __init__(self,master,argv):
@@ -28,7 +28,7 @@ class HSPAttendeesUI(Frame):
 
     def ShopifyAndFranksSpreadsheetLoad(self):
         self.large_res.clear()
-        self.ha = HSPAttendees(self.hsp_year_entry,verbose=self.verbose.get(),order_to_debug=self.order_to_debug.get())
+        self.ha = HSPAttendees(self.hsp_year_entry)
         if self.ha.error:
             self.large_res.set(self.ha.error)
             return
@@ -48,8 +48,9 @@ class HSPAttendeesUI(Frame):
         STButton(vert_frame1, text="SHOPIFY AND FRANK'S S/S LOAD (must do this first)", command=self.ShopifyAndFranksSpreadsheetLoad, same_row=True)
         STWidgetDropDown(vert_frame1,'HSP year: %5s',HSP_YEAR_VALID,default_value=HSP_YEAR_DEFAULT,command=self.HSPYearEntry,same_row=True)
         STButton(vert_frame1, text="Show s/s", command=self.BuildAndDisplaySales, same_row=True)
-        self.order_to_debug = STWidget(vert_frame1, 'order_to_debug:', width=6, same_row=True)
-        self.verbose = STWidget(vert_frame1, 'verbose', check_box=True, width=1, same_row=True)
+        self.num_raffle_winners = STWidget(vert_frame1,'# raffle winners:',width=2,default_value=DEFAULT_NUM_HSP_RAFFLE_WINNERS,same_row=True)
+        STButton(vert_frame1, text="Pick raffle winners", command=self.PickRaffleWinners, same_row=True)
+        STButton(vert_frame1,text='Clear Display',command=self.ClearDisplay,same_row=True)
 
         self.large_res = STLargeResult(self,34,2 * width)
 
@@ -65,10 +66,28 @@ class HSPAttendeesUI(Frame):
             self.large_res.set('Cannot display s/s. Load data first.')
             return
 
-        self.ha.buildAndDisplaySales()
-        if self.ha.error:
-            self.large_res.set(self.ha.error)
+        error = self.ha.buildAndDisplaySales()
+        if error:
+            self.large_res.set(error)
 
+        return
+
+    def PickRaffleWinners(self):
+
+        if not self.ha:
+            self.large_res.set('Cannot pick raffle winners. Load data first.')
+            return
+
+        msg,error = self.ha.pick_raffle_winners(self.num_raffle_winners.get())
+        if error:
+            self.large_res.set(error+'\n')
+        else:
+            self.large_res.set(msg+'\n')
+
+        return
+
+    def ClearDisplay(self):
+        self.large_res.clear()
         return
 
 def main(argv):

@@ -2,10 +2,9 @@ import datetime
 import os
 import csv
 import copy
-import random
 from collections import namedtuple
 from consts import MEMBERSHIP,DONATION,RAD,CC_DOOR_PRIZE,NEAIC_ATTEND,NEAIC_EXHIBITOR,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAF_VENDOR,NEAF_SOLAR_STAR_PARTY,HSP,HSP_RAFFLE,RLS
-from consts import ADMIN,NEAF_ATTEND_DOOR_PRIZE,SSP,TEST,NEAF_VIRTUAL_DOORPRIZE,ALL,NUMBER_OF_DOORPRIZE_WINNERS,NEAF_VIRTUAL_DOORPRIZE_DROPDOWN
+from consts import ADMIN,NEAF_ATTEND_DOOR_PRIZE,SSP,TEST,NEAF_VIRTUAL_DOORPRIZE,ALL,NEAF_VIRTUAL_DOORPRIZE_DROPDOWN
 from consts import DEFAULT_DAY
 from utils import normalizeAddress,convertToStr,get_target_dict,writerow_UnicodeEncodeError,RAC_DIR,normalize_phone_num,get_max_len
 from utils import getFromProperties,getPropertiesDict,OrderTup,PROPERTIES_DICT,ORDER_FIELDS_LIST,NOTE_ATTRIBUTE_KEY,CUSTOM_ATTRIBUTES_KEY
@@ -394,15 +393,12 @@ class Orders(object):
         Folder holding all files used by this program: {3}
         Folder holding "dump to csv" results: {4}
         Number of orders for product type {2}:{5},  Number of raw shopify orders processed in last request:{6}
+        
+        Choose 'Dump to csv - 1 line per item' and expand raffle products to 1 line per raffle ticket. As of 9/21/2026 only HSP raffle is applicable. 
 
-        Instructions for choosing NUMBER_OF_DOORPRIZE_WINNERS:{7} for 'NEAF: The Virtual Experience' raffle:
-        1) Enter 'created_at_min' as the day prior to raffle entries opening.
-        2) Choose product type of 'neaf-attend_virtual_door_prize and {7} raffle winners'
-        3) Choose 'Dump to csv - 1 line per item' and get your winner as 2nd csv file
-
+        {7}
         {8}
         {9}
-        {10}
     ---------------------------------------------------------------------------------------------------------------------
         '''
 
@@ -414,8 +410,7 @@ class Orders(object):
         allProductTypes = ', '.join(Orders.PRODUCT_TYPES)
         numRawShopify = len(self.full_order_dict)
 
-        return hints.format(self.created_at_min,allProductTypes,self.product_type,self.order_dir,self.results_dir,numRawShopify,shopifyCnt,NUMBER_OF_DOORPRIZE_WINNERS,
-                            refundNotesStr,msgStr,errStr)
+        return hints.format(self.created_at_min,allProductTypes,self.product_type,self.order_dir,self.results_dir,numRawShopify,shopifyCnt,refundNotesStr,msgStr,errStr)
 
     def append_row(self,msgs,fmt,cnt,k,created_at,name,company,address,phone_num,email,sku,discount_code,quantity,price,total,paid,note):
         cnt = str(cnt)+'.' if cnt != '' else ''
@@ -729,44 +724,6 @@ class Orders(object):
         msg = 'Find results for {0} orders at {1} .'.format(len(self.order_dict),fname)
         return msg
 
-    def dump_to_csv_door_prize_winners(self,mrows):
-
-        def build_csv_file(fname,mrows_winners):
-
-            with open(fname,'w',encoding="utf-8-sig") as csv_file:
-                wr = csv.writer(csv_file,  quoting=csv.QUOTE_ALL, lineterminator='\n')
-                wr.writerow(ORDER_FIELDS_LIST)
-                for mrow in mrows_winners:
-                    writerow_UnicodeEncodeError(wr,mrow)
-
-            return
-
-        fname = self.csv_fname(prefix='winners')
-        mrows_winners = []
-        duplicate_email_cnt = 0
-        numHigh = len(mrows) - 1
-        winning_emails = {}
-        i = 0
-        while len(mrows_winners) < NUMBER_OF_DOORPRIZE_WINNERS:
-            i += 1
-            ind = random.randint(0, numHigh)
-            mrow = mrows[ind]
-            email = mrow[8]
-            if not winning_emails.get(email):
-                winning_emails[email] = True
-                mrows_winners.append(mrow)
-            else:
-                duplicate_email_cnt += 1
-            if duplicate_email_cnt > 10 * len(mrows):
-                # we have an insufficient number of entries to give away NUMBER_OF_DOORPRIZE_WINNERS prizes. we have 10 times as many dupes as entrants.
-                # clearly we aren't going to be able to give away any more prizes.
-                break
-
-        build_csv_file(fname,mrows_winners)
-        door_prize_winners_msg = 'Also find {0} results for door prize winner chosen from {1} door prize entries at {2} .'.format(len(mrows_winners),numHigh+1,fname)
-
-        return door_prize_winners_msg
-
     def dump_to_csv_1_line_per_item(self):
 
         # previously we saved order_dict displayed in show_order_dict in self.order_dict for saving to csv here.
@@ -812,23 +769,7 @@ class Orders(object):
                         writerow_UnicodeEncodeError(wr,mrow)
                         mrows.append(mrow)
 
-        if self.product_type == NEAF_VIRTUAL_DOORPRIZE:
-            door_prize_winners_msg = self.dump_to_csv_door_prize_winners(mrows)
-        else:
-            door_prize_winners_msg = ''
-
         msg = 'Find results for {0} orders spread out into {1} rows at {2} .'.format(len(self.order_dict),rowCnt,fname)
-        if door_prize_winners_msg:
-            msg += '\n' + door_prize_winners_msg
-        else:
-            winner_inds = random.sample(range(rowCnt),3)
-            msg += '\n'
-            for prize_rank,winner_ind in enumerate(winner_inds):
-                winner = mrows[winner_ind]
-                msg1 = f'\nPrize #{prize_rank+1} randomly selected row is order:{winner_ind+1} in csv, order_num:{winner[0]}, name:{winner[4]}, email:{winner[12]}, '\
-                    f'phone:{winner[11]}, created_at:{winner[3]}, sku:{winner[13]}'
-                msg += msg1
-            msg += '\n'
 
         if skuMultipliersFound:
             msg1 = '\n\n' + '*****************************************\n'\

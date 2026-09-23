@@ -21,7 +21,7 @@ CREATED_AT_MIN_COVID = '2019-11-01'
 CREATED_AT_MAX_COVID = '2023-06-01'
 
 hspDatesTup = namedtuple('hspDatesTup','hsp_start starbq hsp_end')
-HSP_DATES = {2025:hspDatesTup('2025-09-16','2025-09-20','2025-09-27'),2026:hspDatesTup('2026-09-09','2026-09-13','2026-09-17')}
+HSP_DATES = {2025:hspDatesTup('2025-09-16','2025-09-20','2025-09-27'),2026:hspDatesTup('2026-09-09','2026-09-13','2026-09-17'),2027:hspDatesTup('2027-08-26','2027-08-28','2027-08-30')}
 
 # these consts are informational only. They are used on Apps->Manage private apps->Private apps page of shopify admin website at https://rockland-astronomy-club.myshopify.com/admin/apps/private .
 # go there to set up new credentials
@@ -122,8 +122,10 @@ NEAF_YEAR_DEFAULT = NEAF_YEAR_2026 # NEAF_YEAR_COVID
 
 HSP_YEAR_2025 = '2025'
 HSP_YEAR_2026 = '2026'
-HSP_YEAR_VALID = (HSP_YEAR_2025,HSP_YEAR_2026)
+HSP_YEAR_2027 = '2027'
+HSP_YEAR_VALID = (HSP_YEAR_2025,HSP_YEAR_2026,HSP_YEAR_2027)
 HSP_YEAR_DEFAULT = HSP_YEAR_2026
+DEFAULT_NUM_HSP_RAFFLE_WINNERS = 3
 
 MISSING = 'MISSING'
 ERROR = 'ERROR'
