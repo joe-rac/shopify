@@ -230,3 +230,29 @@ query CustomerSearchWithOrders($search: String!) {
   }
 }
 """
+
+HAVEN_CABIN_PRODUCT = """
+query getHavenCabin($id: ID!) {
+  product(id: $id) {
+    id
+    title
+    handle
+    status
+    variants(first: XXX) {
+      nodes {
+        id
+        title
+        sku
+        price
+        selectedOptions {
+          name
+          value
+        }
+        inventoryItem {
+          id
+        }
+      }
+    }
+  }
+}
+"""

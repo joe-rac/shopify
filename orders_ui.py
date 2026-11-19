@@ -42,8 +42,8 @@ class OrdersUI(Frame):
         vert_frame2 = STFrame(self,width,1)
         STButton(vert_frame2, text='NEAIC attendee report (full), Dump to csv', command=self.neaic_attendee_dump_to_csv_full, same_row=True)
         STButton(vert_frame2, text='NEAIC attendee report (incremental), Dump to csv', command=self.neaic_attendee_dump_to_csv_incremental, same_row=True)
-        STButton(vert_frame2,text='Dump to csv',command=self.dump_to_csv,same_row=True)
-        STButton(vert_frame2,text='Dump to csv - 1 line per item',command=self.dump_to_csv_1_line_per_item,same_row=True)
+        STButton(vert_frame2, text='Dump to Excel', command=self.dump_to_excel, same_row=True)
+        STButton(vert_frame2, text='Dump to csv - 1 line per item', command=self.dump_to_csv_1_line_per_item, same_row=True)
         STButton(vert_frame2,text='Show dicts',command=self.show_dicts,same_row=True)
         STButton(vert_frame2,text='Debug on',command=self.debug_on,same_row=True)
         STButton(vert_frame2,text='Debug off',command=self.debug_off,same_row=True)
@@ -77,19 +77,19 @@ class OrdersUI(Frame):
         return
 
     def neaic_attendee_dump_to_csv_full(self):
-        if not self.orderObjectLoaded('neaic_attendee_dump_to_csv'):
+        if not self.orderObjectLoaded('neaic_attendee_dump_to_csv_full'):
             return
         self.large_res.set(self.orders.neaic_attendee_dump_to_csv())
         return
     def neaic_attendee_dump_to_csv_incremental(self):
-        if not self.orderObjectLoaded('neaic_attendee_dump_to_csv'):
+        if not self.orderObjectLoaded('neaic_attendee_dump_to_csv_incremental'):
             return
         self.large_res.set(self.orders.neaic_attendee_dump_to_csv(incremental_since_last_run=True))
         return
-    def dump_to_csv(self):
-        if not self.orderObjectLoaded('dump_to_csv'):
+    def dump_to_excel(self):
+        if not self.orderObjectLoaded('dump_to_excel'):
             return
-        self.large_res.set(self.orders.dump_to_csv())
+        self.large_res.set(self.orders.dump_to_excel())
         return
     def dump_to_csv_1_line_per_item(self):
         if not self.orderObjectLoaded('dump_to_csv_1_line_per_item'):

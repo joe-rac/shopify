@@ -17,12 +17,20 @@ from flask import Flask, request, redirect
 import urllib.parse
 import webbrowser
 from consts import MISSING,NEAF_YEAR_VALID,NEAF_DAYS,NEAF_DATES,NEAF_YEAR_DEFAULT,NEAF_YEAR_2025,DEFAULT_DAY,SATURDAY,SUNDAY,NEAF_YEAR_2026
-from credentials import Credentials
 from utils import RAC_DIR,writerow_UnicodeEncodeError,appendMsg,normalize_unicode_text
 from network_utils import post_and_json_decode_with_retry
-from date_filter_utils import parse_constant_contact_date_filter_args
+from date_filter_utils import get_neaf_dates_from_neaf_year_and_day
 
 from utils import remove_unicode
+
+# XXX 10/16/2026   originally these 4 credentials were acquired from the Credentials object but they have been deprecated when we migrated door prize entries from
+#                  Constant Contact to the Shopify form named 'NEAF Door Prize Entry' with form ID 1175570. We will retain this constant contact file in case
+#                  we ever want to prgrammatically access constant contact data. its extremely unlikely we will ever use constant contact data for the door prize system
+#                  but we might want to use it for management of the RAC email lists.
+CC_REFRESH_TOKEN='AcYpQcoFmcrFwbk_NI3QJ4Z9p8vH0jrW_PBwHkI9MXw'
+CC_CLIENT_ID='b66111d9-86d7-4579-bfdb-25243897684d'
+CC_CLIENT_SECRET = 'RQbzH9NqqjcNuFCxhS_KjA'
+CC_NEAF_DOOR_PRIZE_REGISTRATION_LIST_ID='f625b1c0-8308-11e4-b9e1-d4ae528440e0'
 
 # XXX 6/2/2026    On an unpredictable time frame (typically many months), Constant Contact may replace the refresh token currently stored in credentials.txt
 #                 as the CC_REFRESH_TOKEN value.
@@ -35,7 +43,7 @@ from utils import remove_unicode
 #                 3) run exchange_authorization_code_for_access_token_and_refresh_token(...) with authorization code acquired from step 2) to get access_token and refresh_token.
 #                    replace CC_REFRESH_TOKEN value in credentials.txt with refresh_token.
 #                    access_token generated in this step can be ignored since prod code gets access token from refresh token in call to get_access_token_from_refresh_token().
-refresh_token = Credentials().CC_REFRESH_TOKEN
+refresh_token = CC_REFRESH_TOKEN
 
 CC_API_BASE = "https://api.cc.email/v3"
 CC_DOOR_PRIZE_FIELDS = 'first_name last_name home_phone email_address modified_date'
@@ -49,14 +57,14 @@ def find_free_port():
         return s.getsockname()[1]
 
 # 2/28/2025. client_id and client_secret acquired from https://app.constantcontact.com/pages/dma/portal/appList in "My Applications" tab.
-client_id = Credentials().CC_CLIENT_ID
-client_secret = Credentials().CC_CLIENT_SECRET
+client_id = CC_CLIENT_ID
+client_secret = CC_CLIENT_SECRET
 port = 8080  # find_free_port() #
 # 2/28/2025. the biggest trick copilot told me to get this working was to replace redirect_uri = f'http://localhost:{port}/callback' with value below and also
 #            make same change in
 redirect_uri = f'http://127.0.0.1:{port}/callback'
 # 2/27/2025. this is LIST_ID for "NEAF_Door_Prize_Registration"
-LIST_ID = Credentials().CC_NEAF_DOOR_PRIZE_REGISTRATION_LIST_ID
+LIST_ID = CC_NEAF_DOOR_PRIZE_REGISTRATION_LIST_ID
 limit = 200
 
 scope = "contact_data campaign_data offline_access"
@@ -287,7 +295,8 @@ def get_cc_door_prize_list(neaf_year,neaf_day,raw_cc_to_csv=False,verbose=False)
     #            If date of cc row is inconsistent with NEAF day specified by neaf_year and neaf_day do not include in ccdpt_list.
 
     neaf_year = str(neaf_year)
-    neaf_year_int,neaf_year_default_int,today,neaf_start,neaf_end,neaf_start_dow,neaf_end_dow,msg,msg_ex = parse_constant_contact_date_filter_args(neaf_year, neaf_day)
+    neaf_year_int,neaf_year_default_int,today,neaf_start,neaf_end,neaf_start_dow,neaf_end_dow,msg,msg_ex = \
+        get_neaf_dates_from_neaf_year_and_day(neaf_year, neaf_day, 'get_cc_door_prize_list')
     if msg_ex:
         raise Exception(msg_ex)
 

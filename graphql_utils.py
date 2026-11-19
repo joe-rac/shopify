@@ -1,17 +1,16 @@
 import copy
-import json
 # install with
 # pip install requests
 import requests
 import pprint
-from consts import SHOP_NAME,ADMIN_API_VERSION
+from consts import SHOP_NAME,SHOPIFY_API_VERSION
 from graphql_queries import MUTATE_CUSTOM_ATTRIBUTES,ORDER_ID_AND_NOTE_ATTRIBUTES,CUSTOMER_SEARCH_WITH_ORDERS
 from utils import appendMsg
 from credentials import Credentials
 
 def get_url_and_headers():
-    url = 'https://{0}.myshopify.com/admin/api/{1}/graphql.json'.format(SHOP_NAME,ADMIN_API_VERSION)
-    headers = {"Content-Type": "application/graphql","X-Shopify-Access-Token": Credentials().SHOPIFY_PASSWORD_RW }
+    url = 'https://{0}.myshopify.com/admin/api/{1}/graphql.json'.format(SHOP_NAME, SHOPIFY_API_VERSION)
+    headers = {"Content-Type": "application/json","X-Shopify-Access-Token": Credentials().SHOPIFY_PASSWORD_RW }
     return url,headers
 
 def get_orders_cursor_items(res):
@@ -88,7 +87,7 @@ def load_and_adjust_custom_attributes(order_num,key,value=None,delete_key=False)
     gql = ORDER_ID_AND_NOTE_ATTRIBUTES.replace('#ORDER_NUM', str(order_num))
     url, headers = get_url_and_headers()
     # 6/2/2026. this call to requests.post is not replaced with post_and_json_decode_with_retry because no current use case for retries needed for customAttributes edits.
-    response = requests.post(url, data=gql, headers=headers)
+    response = requests.post(url, json={'query':gql}, headers=headers)
     msg = appendMsg(msg,f'status_code from requests.post:{response.status_code}',print_new_msg=False)
     rd = response.json()
     #print(pprint.pformat(rd, width=200))
@@ -165,18 +164,16 @@ def mutate_custom_attributes(order_num, order_id, customAttributes):
     msg = ''
     variables = {"input": {"id": order_id, "customAttributes": customAttributes }}
     vstr = pprint.pformat(variables, width=200)
-    note_update = json.dumps({"query": MUTATE_CUSTOM_ATTRIBUTES,"variables": variables})
-    r_headers = {'Content-Type': 'application/json'}
-    req = f"https://{SHOP_NAME}.myshopify.com/admin/api/{ADMIN_API_VERSION}/graphql.json"
+    url,headers = get_url_and_headers()
 
     # 6/2/2026. this call to requests.post is not replaced with post_and_json_decode_with_retry because its for mutate. no current use case for retries with mutate.
-    r = requests.post(url=req, data=note_update, auth=(Credentials().SHOPIFY_API_KEY_RW,Credentials().SHOPIFY_PASSWORD_RW),headers = r_headers)
+    r = requests.post(url=url, json={'query': MUTATE_CUSTOM_ATTRIBUTES,'variables': variables}, headers = headers)
     if r.status_code != 200:
         msg = f"Failed updating customAttributes:\n{vstr}\nin shopify. Response status_code:{r.status_code} is invalid. Expecting 200.\nYou're fucked. Contact your programmer."
         return False,msg
     else:
         vstr = pprint.pformat(variables, width=200)
-        msg = f'\nSuccessfully updated customAttributes for order_num:{order_num} at\n{req}\nwith data\n{vstr}\n'
+        msg = f'\nSuccessfully updated customAttributes for order_num:{order_num} at\n{url}\nwith data\n{vstr}\n'
     return True,msg
 
 def graphql_query(gql,variables=None):
@@ -184,9 +181,8 @@ def graphql_query(gql,variables=None):
     url,headers = get_url_and_headers()
 
     if variables is None:
-        response = requests.post(url,data=gql,headers=headers)
+        response = requests.post(url,json={'query': gql},headers=headers)
     else:
-        headers['Content-Type'] = 'application/json'
         response = requests.post(url,json={'query':gql,'variables':variables},headers=headers)
 
     response.raise_for_status()

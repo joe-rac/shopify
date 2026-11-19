@@ -9,7 +9,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment
 
 from consts import HSP_YEAR_DEFAULT,HSP,HSP_DATES,MEMBERSHIP,MISSING,DEFAULT_NUM_HSP_RAFFLE_WINNERS
-from utils import load_franks_rac_membership_spreadsheet,appendMsg
+from utils import load_franks_rac_membership_spreadsheet,appendMsg,show_and_save_namedtuple_collection_as_excel
 from orders import Orders
 
 HSP_ATTENDEE_FIELDS = 'name first_name last_name email expiration_date contribution starbq cabin raffle prv_tent platform order_nums created_at_latest comment'
@@ -89,38 +89,9 @@ class HSPAttendees(object):
         if not len(self.hat_list):
             return 'Cannot build and display HSP sales s/s because no HSP sales data loaded.'
 
-            # 9/5/2026. build and display temporary HSP attendee s/s.
-        fd, fname = tempfile.mkstemp(suffix='.xlsx')
-        os.close(fd)
-        wb = Workbook()
-        ws = wb.active
-        ws.title = 'HSP Attendees'
-        ws.append(HspAttendeeTup._fields)
-        ws.freeze_panes = 'A2'
+        msg = show_and_save_namedtuple_collection_as_excel(sorted(self.hat_list, key=lambda hat: hat.created_at_latest, reverse=True), description='HSP Attendees', column_is_text=('order_nums',))
 
-        for hat in sorted(self.hat_list,key=lambda hat: hat.created_at_latest,reverse=True):
-            ws.append(hat)
-
-        for row in ws.iter_rows():
-            for cell in row:
-                if cell.value == MISSING:
-                    cell.alignment = Alignment(horizontal='right')
-
-        order_nums_col = HspAttendeeTup._fields.index('order_nums') + 1
-        for row_num in range(2,ws.max_row + 1):
-            cell = ws.cell(row=row_num,column=order_nums_col)
-            cell.value = str(cell.value)
-            cell.number_format = '@'
-            cell.quotePrefix = True
-
-        for column_cells in ws.columns:
-            max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column_cells)
-            ws.column_dimensions[column_cells[0].column_letter].width = max_length + 2
-
-        wb.save(fname)
-        os.startfile(fname)
-
-        return ''
+        return msg
 
     def shopifyAndFranksSpreadsheetLoad(self):
 

@@ -29,7 +29,7 @@ class DoorPrizeUI(Frame):
         self.l0.grid()
 
         vert_frame1 = STFrame(self,100,1)
-        STButton(vert_frame1, text='Load Data (must do this first)', command=self.ConstantContactAndShopifyLoad, same_row=True)
+        STButton(vert_frame1, text='Load Data (must do this first)', command=self.SFAndShopifyLoad, same_row=True)
         STButton(vert_frame1,text='Pick Winner',command=self.PickWinner,same_row=True)
         STButton(vert_frame1,text='Build Winners PDF',command=self.BuildWinnersPdf,same_row=True)
         STWidgetDropDown(vert_frame1,'Choose NEAF Year: %4s', NEAF_YEAR_VALID, default_value=NEAF_YEAR_DEFAULT, command=self.ChooseNEAFYear, same_row=True)
@@ -66,12 +66,12 @@ class DoorPrizeUI(Frame):
             return
         self.small_res.set(build_winners_pdf(self.dp.dpSrc.winner,self.dp.neaf_year,self.dp.neaf_day_of_week))
         return
-    def ConstantContactAndShopifyLoad(self):
+    def SFAndShopifyLoad(self):
         self.dp = DoorPrize(neaf_year=self.neaf_year,override_day=self.neaf_day_of_week, verbose=self.verbose)
         if self.dp.error:
             self.large_res.set(showError(self.dp.error) + '\n' + self.dp.msg)
             return
-        self.dp.constantContactAndShopifyLoad()
+        self.dp.sFAndShopifyLoad()
         self.large_res.set(self.dp.msg  + '\n' + self.dp.show_dicts_summary())
         return    
     def ShowData(self):

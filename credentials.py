@@ -9,8 +9,7 @@ class Credentials:
     """
 
     # 10/24/2025. Class-level constants listing expected environment variables.
-    _ENVVARS = ("SHOPIFY_API_KEY", "SHOPIFY_API_KEY_RW", "SHOPIFY_PASSWORD", "SHOPIFY_PASSWORD_RW", "SHOPIFY_API_KEY_2",
-                "SHOPIFY_PASSWORD_2", "CC_REFRESH_TOKEN", "CC_CLIENT_ID", "CC_CLIENT_SECRET","CC_NEAF_DOOR_PRIZE_REGISTRATION_LIST_ID")
+    _ENVVARS = ("SHOPIFY_API_KEY_RW", "SHOPIFY_PASSWORD_RW", "GOOGLE_SHEETS_NEAF_DOOR_PRIZE_ID", "SHOPIFY_STOREFRONT_PRIVATE_TOKEN")
 
     # 10/24/2025. Class-level cache of env values; loaded once per process.
     _values = {}
@@ -81,10 +80,7 @@ class Credentials:
                 raise RuntimeError(Credentials.error)
 
             envvars = Credentials._ENVVARS
-            midpoint = len(envvars) // 2
-            first_half = ', '.join(envvars[:midpoint])
-            second_half = ', '.join(envvars[midpoint:])
-            credstr = first_half + '\n' + second_half
+            credstr = ', '.join(envvars)
             print(f"\nSuccessfully loaded the following {len(Credentials._ENVVARS)} credentials from {Credentials._full_path}.\n{credstr}")
             print('Use these values for all subsequent Credentials object instantiations in this unit of work.\n')
 

@@ -1,7 +1,7 @@
 
 from collections import namedtuple
 
-ADMIN_API_VERSION = '2024-10'
+SHOPIFY_API_VERSION = '2026-10'
 # 1/28/2026. when running the precommit sanity check runs in from either ../RAC/py_scripts or ../RAC_share/py_scripts. import PRECOMMIT_SANITY_CHECK and set to which dir we are running in
 #            if in precommit_sanity stack frame. Use in RAC_DIR to build folders to hold results for the 2 runs.
 PRECOMMIT_SANITY_CHECK = None
@@ -23,14 +23,10 @@ CREATED_AT_MAX_COVID = '2023-06-01'
 hspDatesTup = namedtuple('hspDatesTup','hsp_start starbq hsp_end')
 HSP_DATES = {2025:hspDatesTup('2025-09-16','2025-09-20','2025-09-27'),2026:hspDatesTup('2026-09-09','2026-09-13','2026-09-17'),2027:hspDatesTup('2027-08-26','2027-08-28','2027-08-30')}
 
-# these consts are informational only. They are used on Apps->Manage private apps->Private apps page of shopify admin website at https://rockland-astronomy-club.myshopify.com/admin/apps/private .
-# go there to set up new credentials
-PRIVATE_APP_NAME = 'py_scripts'
-PRIVATE_APP_NAME_2 = 'py_scripts2'
-PRIVATE_APP_NAME_RW = 'py_scripts_rw'
-
 # 12/8/2025. the credentials file will be in same dir as project but will be excluded from commit to github with .gitignore file
 CREDENTIALS_FILE_NAME = 'credentials.txt'
+# 11/13/2026. path where all excel reports from show_and_save_namedtuple_collection_as_excel(...) are dropped.
+EXCEL_REPORTS_DIR = 'excel_reports'
 
 SHOP_NAME = 'rockland-astronomy-club'
 
@@ -46,7 +42,7 @@ NEAF_ATTEND_RAFFLE = 'neaf_attend_raffle'
 NEAIC_ATTEND = 'neaic_attend'
 NEAIC_EXHIBITOR = 'neaic_exhibitor'
 RAD = 'rad'
-CC_DOOR_PRIZE = 'cc_door_prize'
+SF_DOOR_PRIZE = 'sf_door_prize'
 HSP = 'hsp'
 HSP_RAFFLE = 'hsp_raffle'
 RLS = 'rls'
@@ -84,6 +80,8 @@ SKUS_TO_LOAD_DICT = {
     ADMIN:(ADMIN,),
     ALL:ALL
     }
+# 11/18/2026. these categories used to aggregate all product sales under a few largwe categories. major use case is revenue by category reports.
+SKU_CATEGORIES = ('neaf_vendor','neaf_attend','neaic','rac_membership','rac_donation','rad','hsp')
 NEAF_RELATED_PRODUCT_TYPES = (NEAF_ATTEND, NEAF_VENDOR, NEAIC_ATTEND, NEAIC_EXHIBITOR, NEAF_ATTEND_DOOR_PRIZE, NEAF_SOLAR_STAR_PARTY, NEAF_ATTEND_RAFFLE)
 # 1/15/2023. NEAF Vendor Management Tool queries for neaf_year of 'covid' are different. 'covid' means NEAF 2023 but sum together all NEAF vendor orders from 2020, 2021, 2022 and 2023.
 # however exclude the following NEAF Vendor purchases for virtual NEAFs of 2020 and 2021.
@@ -118,7 +116,7 @@ NEAF_YEAR_VALID = (NEAF_YEAR_ALL,NEAF_YEAR_2015,NEAF_YEAR_2016,NEAF_YEAR_2017,NE
 
 # TODO 1/15/2022. starting with after NEAF 2024 change NEAF_YEAR_DEFAULT for neaf_year back to latest NEAF_YEAR_<year> to pick up current year.
 #  for now default of NEAF_YEAR_COVID means sum together all NEAF Vendors orders from 2020, 2021, 2022 and 2023.
-NEAF_YEAR_DEFAULT = NEAF_YEAR_2026 # NEAF_YEAR_COVID
+NEAF_YEAR_DEFAULT = NEAF_YEAR_2027 # NEAF_YEAR_COVID
 
 HSP_YEAR_2025 = '2025'
 HSP_YEAR_2026 = '2026'
@@ -130,6 +128,7 @@ DEFAULT_NUM_HSP_RAFFLE_WINNERS = 3
 MISSING = 'MISSING'
 ERROR = 'ERROR'
 REFUND = 'REFUND'
+PARTIAL_REFUND = 'partial_'+REFUND
 FAILED_REFUND = 'FAILED_REFUND'
 DECLINED = 'DECLINED'
 N_A = 'N/A'

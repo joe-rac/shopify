@@ -2,14 +2,14 @@
 from collections import namedtuple
 import tempfile
 import os
-from utils import appendMsg
+from utils import appendMsg,show_and_save_namedtuple_collection_as_excel
 from graphql_utils import get_order_nums_from_customer_search
 from orders import Orders
 from openpyxl import Workbook
 
 CUSTOMER_FIELDS = 'displayName email phone street city state zip country'
 CustomerTup = namedtuple('CustomerTup', CUSTOMER_FIELDS)
-LINE_ITEM_FIELDS = 'order_num created_at name phone_num sku quantity paid'
+LINE_ITEM_FIELDS = 'order_num created_at name company email phone_num sku dsc_code dsc price quantity paid note'
 LineItemTup =  namedtuple('LineItemTup', LINE_ITEM_FIELDS)
 
 class CustomerOrders(object):
@@ -57,7 +57,7 @@ class CustomerOrders(object):
 
         products = [orders.order_dict[k] for k in sorted(orders.order_dict.keys(),key=lambda k: tuple(int(x) for x in k.split('-')),reverse=True)]
         for pr in products:
-            self.line_items.append(LineItemTup(pr.order_num,pr.created_at,pr.name,pr.phone_num,pr.sku,pr.quantity,pr.paid))
+            self.line_items.append(LineItemTup(pr.order_num,pr.created_at,pr.name,pr.company_name,pr.email,pr.phone_num,pr.sku,pr.discount_code,pr.discount,pr.price,pr.quantity,pr.paid,pr.note))
             quantity_tot = self.sku_to_quantity_map.get(pr.sku,0)
             self.sku_to_quantity_map[pr.sku] = quantity_tot + pr.quantity
 
@@ -116,25 +116,5 @@ class CustomerOrders(object):
 
         return
     def displayLineItems(self):
-
-        fd,fname = tempfile.mkstemp(suffix='.xlsx')
-        os.close(fd)
-
-        wb = Workbook()
-        ws = wb.active
-        ws.title = 'Line Items'
-
-        ws.append(LineItemTup._fields)
-        ws.freeze_panes = 'A2'
-
-        for line_item in self.line_items:
-            ws.append(line_item)
-
-        for column_cells in ws.columns:
-            max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column_cells)
-            ws.column_dimensions[column_cells[0].column_letter].width = max_length + 2
-
-        wb.save(fname)
-        os.startfile(fname)
-
+        show_and_save_namedtuple_collection_as_excel(self.line_items, 'Line Items')
         return

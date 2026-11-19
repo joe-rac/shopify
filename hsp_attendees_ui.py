@@ -66,9 +66,8 @@ class HSPAttendeesUI(Frame):
             self.large_res.set('Cannot display s/s. Load data first.')
             return
 
-        error = self.ha.buildAndDisplaySales()
-        if error:
-            self.large_res.set(error)
+        msg = self.ha.buildAndDisplaySales()
+        self.large_res.set(msg)
 
         return
 

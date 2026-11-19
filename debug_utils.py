@@ -1,15 +1,21 @@
 
 # valid sku keys
+import requests
+import csv
+import io
+import re
+import datetime
 from consts import MEMBERSHIP,DONATION,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAIC_ATTEND,RAD,HSP,HSP_RAFFLE,RLS,SSP,DOOR_PRIZE,MERCH,NEAF_VENDOR,ADMIN,ALL
-from consts import SHOP_NAME,ADMIN_API_VERSION,NEAF_YEAR_DEFAULT,SATURDAY,NEAF_YEAR_2026,HSP_YEAR_DEFAULT
+from consts import SHOP_NAME,SHOPIFY_API_VERSION,NEAF_YEAR_DEFAULT,SATURDAY,NEAF_YEAR_2026,NEAF_YEAR_2027,HSP_YEAR_DEFAULT,NEAF_YEAR_2025
 from utils import load_franks_rac_membership_spreadsheet
 from credentials import Credentials
 from orders import Orders
-from door_prize import DoorPrize
+from door_prize import DoorPrize,get_sf_door_prize_entries_by_date_range,SfDoorPrizeTup
 from neaf_vendor import NEAFVendor
 from hsp_attendees import HSPAttendees
 from neaf_vendor_utils import save_invoice
 from customer_orders import CustomerOrders
+from haven_cabin import HavenCabin
 
 import tracemalloc
 tracemalloc.start()
@@ -32,7 +38,7 @@ refund_examples = [
     ('2/20/2019','2/21/2019',7618),    # QHYCCD. refunded $396, full order refund of booth.
 ]
 
-def accesshopify_by_date_range_and_sku(ind=8,):
+def orders_by_date_range_and_sku_and_order_num(ind=8,):
 
     # 1/2/2025. this block returns 7 orders
     order_to_debug = None
@@ -74,26 +80,47 @@ def accesshopify_by_date_range_and_sku(ind=8,):
     # product_type = ALL
 
     # 1/31/2026. this block used to test new donation field of Donor Name(s) in custom attribute. #17426 has Name(s) of Donor: Chaim and Rivka Shmuelowitz
-    created_at_min = '2025-01-01'
-    created_at_max = '2026-02-01'
-    product_type = DONATION
-    order_to_debug = None
+    # created_at_min = '2025-01-01'
+    # created_at_max = '2026-02-01'
+    # product_type = DONATION
+    # order_to_debug = None
+
+    # 11/14/2026. #15574, AstronScientific is to test fix for refund to for neaf_vendor_payment. order quantity was 479 implying $479 but refund in order was for $20.92 which was converted to
+    #                    19.95 euros. bizzarely refund in NEAF vendormanagment s/s rendered as $10,059 which was 479 * $20.92. this refund at order level so shouldn't be multiplied by quantity.
+    #             #15317 is a normal order level refund of $306 which had quantity of 1 so calculated correctly.
+    #             #15417 is line item refund for neaf_attend_admit_2day of $70. quantity was 0.
+    #             #16656 refunds 2 neaf_attend_admit_sunday. use this to test a quantity not equal to 1 but with a valid refund unlike error in 479 quantity in ##15574
+    created_at_min = None
+    created_at_max = None
+    order_to_debug = '15574|15317|15417|16656'
 
     verbose = False
     orders = Orders(product_type,order_to_debug=order_to_debug,verbose=verbose)
     if orders.error:
         print(orders.error)
         return
-    orders.shopifyLoad(created_at_min=created_at_min,created_at_max=created_at_max)
+    # 11/14/2026. TODO this is retarded hack that I pass order_to_debug to cstr and member. see comment at "TODO 9/8/2026." in customer_orders.py for more info.
+    orders.shopifyLoad(created_at_min=created_at_min,created_at_max=created_at_max,order_to_debug=order_to_debug)
 
     msg = orders.error if orders.error else orders.show_dicts()
     print(msg)
-    print(orders.dump_to_csv())
+    print(orders.dump_to_excel())
 
     #accessOrders = AccessOrders( sku_key,created_at_min,created_at_max=None, order_to_debug, verbose)
 
     return
 
+def openNEAFVendorExcel(neaf_year=NEAF_YEAR_2027):
+
+    verbose = False
+    nv = NEAFVendor(neaf_year,verbose=verbose)
+    nv.shopifyLoad()
+    if nv.error:
+        print(nv.error)
+    else:
+        nv.openNEAFVendorExcel()
+
+    return
 def neafvendor_management_ss_and_invoices_to_console_from_orders(ind=12):
 
     from neaf_vendor import NEAFVendor
@@ -143,13 +170,18 @@ def neafvendor_management_ss_and_invoices_to_console_from_orders(ind=12):
     #           #17377 for Woodland Hills, 2 premium. split into 2 companies with #19066, 10 Micron which uses sku neaf_vendor_booth_extra_ss_row.
     order_to_debug = '19067|17376|19065|19066|17377|17712|17309'
 
+    # 11/18/2026. #15574, AstronScientific is to test fix for refund to for neaf_vendor_payment. order quantity was 479 implying $479 but refund in order was for $20.92 which was converted to
+    #                    19.95 euros. bizzarely refund in NEAF vendormanagment s/s rendered as $10,059 which was 479 * $20.92. this refund at order level so shouldn't be multiplied by quantity.
+    #             #16084. AstronScientific booth order.
+    #             #15317 is a normal order level refund of $306 which had quantity of 1 so calculated correctly.
+    order_to_debug = '15574|16084|15317'
 
     nv = NEAFVendor(neaf_year,created_at_min,created_at_max,order_to_debug,verbose)
     nv.shopifyLoad()
     if nv.error:
         print(nv.error)
     else:
-        print(nv.output_nvt_csv('neaf_vendor'))
+        print(nv.output_nvt_csv(NEAF_VENDOR))
         #company_key = 'Australis'
         if not nv.nv_collections.vendor_invoices:
             invoice = f'nv.nv_collections.vendor_invoices is {nv.nv_collections.vendor_invoices}. No invoices created for order_to_debug:{order_to_debug}.'
@@ -161,7 +193,7 @@ def neafvendor_management_ss_and_invoices_to_console_from_orders(ind=12):
 
     return
 
-def neafvendor_invoice(company_key='Celestron',neaf_year=NEAF_YEAR_2026,as_pdf=True):
+def neafvendor_invoice(company_key='AstronScientific',neaf_year=NEAF_YEAR_2025,as_pdf=True):
     nv = NEAFVendor(neaf_year=neaf_year)
     nv.shopifyLoad()
     if nv.error:
@@ -201,7 +233,7 @@ def tutorial_door_prize(override_day=SATURDAY,verbose=True):
     if dp.error:
         print('after DoorPrize(override_day=override_day, verbose=verbose):\ndp.error:\n{0}dp.msg:\n{1}'.format(dp.error,dp.msg))
         return
-    dp.constantContactAndShopifyLoad()
+    dp.sFAndShopifyLoad()
     if dp.error:
         print('after dp.constantContactAndShopifyLoad():\ndp.error:\n{0}dp.msg:\n{1}'.format(dp.error,dp.msg))
         return
@@ -249,10 +281,8 @@ def hspattendee_load(hsp_year=HSP_YEAR_DEFAULT):
         return
     print('\n---------------------------------\n' + ha.msg + '\n---------------------------------\n')
 
-    error = ha.buildAndDisplaySales()
-    if error:
-        print('\n-----------------ERROR----------------\n' + error)
-        return
+    msg = ha.buildAndDisplaySales()
+    print(msg)
 
     return
 
@@ -277,10 +307,47 @@ def hsp_raffle_winners(hsp_year=HSP_YEAR_DEFAULT):
     return
 
 def customer_orders(cust_str):
-
     co = CustomerOrders()
     co.loadOrdersForCustomer(cust_str)
     co.displayLineItems()
+    return
+
+def haven_cabin():
+    hc = HavenCabin()
+    print('\n'+hc.msg)
+    return
+
+def get_sf_door_prize_entries(created_at_min='2026-09-01',created_at_max=None):
+    if not created_at_max:
+        created_at_max = datetime.date.today().strftime('%Y-%m-%d')
+    sf_door_prize_list,msg,error = get_sf_door_prize_entries_by_date_range(created_at_min, created_at_max)
+    print('\n'.join(str(x) for x in sf_door_prize_list))
+    print('\nmsg:\n'+msg)
+    print('\nerror:\n'+error)
+    return
+
+def get_neaf_door_prize_google_sheet():
+
+    sheet_id = Credentials().GOOGLE_SHEETS_NEAF_DOOR_PRIZE_ID
+
+    url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/edit'
+    html = requests.get(url).text
+    name = re.search(r'<title>(.*?)</title>', html).group(1)
+    print(name)
+
+    url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0'
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.RequestException as ex:
+        error = f'Failed loading NEAF Door Prize Google Sheet.\n{ex}'
+        print(error)
+        return
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    google_sheets_door_prize_list = []
+    for row in rows:
+        google_sheets_door_prize_list.append(SfDoorPrizeTup(**row))
+    print(google_sheets_door_prize_list)
     return
 
 def main():
@@ -289,13 +356,17 @@ def main():
     #neafvendor_management_ss_and_invoices_to_console_from_orders() # 8/31/2026. fix bug for Spectrum Optical were 3 standard + 1 premium and upgrade shows as 2 standard + 1 premium
     #neafvendor_invoice() #  ('Spectrum Optical Instruments',as_pdf=False)
     #neafvendor_load()
-    #accesshopify_by_date_range_and_sku()
+    #orders_by_date_range_and_sku_and_order_num()
     #tutorial_door_prize()
     #tutorial_door_prize_constant_contact_only()
     #tutorial_franks_spreadsheet()
     #hspattendee_load()
-    hsp_raffle_winners()
-    #customer_orders('colker')  # 'mulder'
+    #hsp_raffle_winners()
+    #customer_orders('camera concepts')  # 'colker' 'mulder' 'camera concepts'
+    #haven_cabin()
+    #get_sf_door_prize_entries()
+    #get_neaf_door_prize_google_sheet()
+    openNEAFVendorExcel()
 
     return
 

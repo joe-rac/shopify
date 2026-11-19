@@ -3,8 +3,9 @@
 #            NEAF year / NEAF day semantics
 #            The classes AccessOrders, NEAFVendor and DoorPrize all inherit from AccessShopify and all need date filters when they load from shopify.
 
-from datetime import datetime,date
+from datetime import datetime,date,timedelta
 from consts import NEAF_RELATED_PRODUCT_TYPES,NEAF_YEAR_DEFAULT,DONATION,MEMBERSHIP,NEAF_DATES,NEAF_YEAR_VALID,NEAF_YEAR_ALL,ERROR,SATURDAY,SUNDAY,NEAF_DAYS,DEFAULT_DAY
+from consts import SF_DOOR_PRIZE
 from utils import get_date,get_default_neaf_year,goodDateStr,appendMsg
 
 def initialize_neaf_year(created_at_min,created_at_max,neaf_year):
@@ -114,7 +115,7 @@ def calc_default_date_window_from_product_type(product_type):
         else:
             created_at_min = f'{year-1}-10-01'
 
-    elif product_type == 'cc_door_prize':
+    elif product_type == SF_DOOR_PRIZE:
         now_dt = now.date()
         now_date = now_dt.strftime("%Y-%m-%d")
         default_neaf_start_date = NEAF_DATES[int(NEAF_YEAR_DEFAULT)][0]
@@ -128,8 +129,12 @@ def calc_default_date_window_from_product_type(product_type):
             created_at_min = prior_neaf_start_date
             created_at_max = prior_neaf_end_date
 
+    elif product_type == 'rls':
+        start_date = now - timedelta(days=25)
+        created_at_min = start_date.strftime('%Y-%m-%d')
+
     else:
-        start_date = now - datetime.timedelta(days=370)
+        start_date = now - timedelta(days=370)
         created_at_min = start_date.strftime('%Y-%m-%d')
     return created_at_min,created_at_max
 
@@ -183,13 +188,13 @@ def calc_date_items_from_neaf_year_and_day(neaf_year,override_day):
 
     return None,None,None,error
 
-def parse_constant_contact_date_filter_args(neaf_year, neaf_day):
+def get_neaf_dates_from_neaf_year_and_day(neaf_year, neaf_day, caller_name):
 
     msg = ''
     msg_ex = ''
     neaf_year_int,neaf_year_default_int,today,neaf_start,neaf_end,neaf_start_dow,neaf_end_dow = (None,) * 7
 
-    msg_front = 'In get_cc_door_prize_list'
+    msg_front = 'In '+caller_name
     if neaf_year not in NEAF_YEAR_VALID:
         msg_ex = f"{msg_front} passed in value of neaf_year:{neaf_year} not in NEAF_YEAR_VALID:{NEAF_YEAR_VALID}."
         return neaf_year_int,neaf_year_default_int,today,neaf_start,neaf_end,neaf_start_dow,neaf_end_dow,msg,msg_ex

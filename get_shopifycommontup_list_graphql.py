@@ -1,7 +1,7 @@
 import pprint
 from consts import SKUS_TO_LOAD_DICT,ALL,MEMBERSHIP,REFUND,ShopifyCommonTup,MISSING,FAILED_REFUND
 from utils import remove_unicode,getItem,normalize_phone_num,convert_utc_to_local_datetime,CUSTOM_ATTRIBUTES_KEY
-from get_shopifycommon_tup_list_utils import skipExcludedCovidSkuOrders,show_ShopifyCommonTup_list,refund_desc,get_ShopifyCommonTup_highest_price,convert_ShopifyCommonTup_to_refund
+from get_shopifycommon_tup_list_utils import skipExcludedCovidSkuOrders,show_ShopifyCommonTup_list,refund_desc,get_ShopifyCommonTup_highest_price,convert_ShopifyCommonTup_to_deal_refund
 from get_shopifycommon_tup_list_utils import _buildRefundNote,refunds_list_desc,get_line_item_TOTAL_to_sku_quantity_map,_buildRefundLineItemsDesc
 
 def get_line_item(line_items,sku):
@@ -479,7 +479,7 @@ def get_shopifyCommonTup_list_graphql(orders,neaf_year_raw,sku_key,order_to_debu
             #           apply the dollarsRefunded to the entire order. add additional ShopifyCommonTup to sctList for the negative amount of refund. example is #15317.
             moneyRefunded = skus_refunded[REFUND]
             sct = get_ShopifyCommonTup_highest_price(order_num,sctList)
-            sct = convert_ShopifyCommonTup_to_refund(moneyRefunded,sct)
+            sct = convert_ShopifyCommonTup_to_deal_refund(moneyRefunded, sct)
             sctList.append(sct)
 
     if debug:

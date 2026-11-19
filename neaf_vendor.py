@@ -5,9 +5,10 @@ import tracemalloc
 import tempfile
 import os
 import copy
+from openpyxl import Workbook
 from consts import NEAF_VENDOR,NEAF_VENDOR,NEAF_FULL,NEAF_RAW,NEAF_COMPANY_BADGE,NEAF_YEAR_DEFAULT,REFUND,N_A,ERROR
 from utils import get_date,NeafVendorCollectionsTup,show_dict,show_neaf_vendor_dict,NeafVendorTup,getCurrencySymbolFromCode,NEAF_VENDOR_FIELDS
-from utils import NeafSSTup,writerow_UnicodeEncodeError,RAC_DIR,STARS,nvtDesc,NOTE_ATTRIBUTE_KEY,CUSTOM_ATTRIBUTES_KEY
+from utils import NeafSSTup,writerow_UnicodeEncodeError,RAC_DIR,STARS,nvtDesc,NOTE_ATTRIBUTE_KEY,CUSTOM_ATTRIBUTES_KEY,show_and_save_namedtuple_collection_as_excel
 from neaf_vendor_utils import useOrderNoteAttributeEdits,getNamesFromOrderProperty,setAddress,setName,setCost,setOrderDetails,setOrderProperties,useNameFromAttribute
 from neaf_vendor_utils import addItemToNvtDict,set_vendor_properties_tup,mergeNvts,mergedDiscounts,getBadgeEntitledCntAndNames,removeBadgesFromRefundedOrders,applyBadgeNameEdits
 from neaf_vendor_utils import convert_neafVendorTup_to_processed,get_distinct_order_properties,item_count_description,build_address_text,normalize_big_string
@@ -53,12 +54,12 @@ class NEAFVendor(AccessShopify):
             email,booth_st_qty,booth_st,booth_prem_qty,booth_prem,
             upgrade_st_to_prem_qty,upgrade_st_to_prem,get_booths_from_order,sent_booths_to_orders,no_st_booths_from_order,no_pr_booths_from_order,
             extra_tables_qty,extra_tables,extra_chairs_qty,extra_chairs,elec,carpet,additional_badges_qty,additional_badges,wifi,shipping_box,
-            shipping_pallet,sponsorship,donation,declined_neaf_2023,prize_donation,prize_donation_value,
+            shipping_pallet,sponsorship,neaf_vendor_payment,wire_fee,refund,donation,declined_neaf_2023,prize_donation,prize_donation_value,
             currencyCode,total_cost,paid,total_due,
-            check_number,total_discounts,discount_codes,booth_comments,sales_comments,error,
+            check_number,total_discounts,discount_codes,company_comments,error,
             total_cost_presentment,paid_presentment,total_due_presentment,total_discounts_presentment,
             shipping_box_qty,shipping_pallet_qty,order_note,debug,order_details,order_properties,
-            badge_names_orig,badge_entitled_cnt,badge_names) = (None,) * 60
+            badge_names_orig,badge_entitled_cnt,badge_names) = (None,) * 62
 
         order_num = sct.order_num
         # 12/27/2022. Bizzarely order_num is in there twice, 2nd time its orderNumber. that's the simplest way of getting it into the s/s in the current framework where s/s fields run
@@ -89,6 +90,7 @@ class NEAFVendor(AccessShopify):
         properties = sct.line_item.get(CUSTOM_ATTRIBUTES_KEY())
         nvpt = set_vendor_properties_tup(properties)
         #requested_booth_loc = nvpt.requested_booth_loc
+        company_comments = nvpt.company_comments
         if nvpt.get_booths_from_order:
             get_booths_from_order = nvpt.get_booths_from_order
         if isinstance(nvpt.no_st_booths_from_order,int):
@@ -119,8 +121,9 @@ class NEAFVendor(AccessShopify):
                             email, booth_st_qty, booth_st, booth_prem_qty, booth_prem,
                             upgrade_st_to_prem_qty, upgrade_st_to_prem, get_booths_from_order, sent_booths_to_orders, no_st_booths_from_order, no_pr_booths_from_order,
                             extra_tables_qty, extra_tables, extra_chairs_qty, extra_chairs, elec, carpet, additional_badges_qty, additional_badges, wifi, shipping_box,
-                            shipping_pallet, sponsorship, donation, donation_order_from_attribute, exclude_order_from_attribute, declined_neaf_2023, prize_donation, prize_donation_value,
-                            currencyCode, total_cost, paid, total_due, check_number, total_discounts, discount_codes, booth_comments, sales_comments, order_note, nvpt.error,
+                            shipping_pallet, sponsorship, neaf_vendor_payment, wire_fee, refund, donation, donation_order_from_attribute, exclude_order_from_attribute,
+                            declined_neaf_2023, prize_donation, prize_donation_value,
+                            currencyCode, total_cost, paid, total_due, check_number, total_discounts, discount_codes, company_comments, order_note, nvpt.error,
 
                             total_cost_presentment,paid_presentment,total_due_presentment,total_discounts_presentment,
                             shipping_box_qty, shipping_pallet_qty, order_num_to_donation_map, order_note_attributes, order_id,refund_note, refund_created_at,
@@ -432,12 +435,10 @@ class NEAFVendor(AccessShopify):
             invoice += '{0}REFUNDS ISSUED {1}:\n'.format(margin,nvt.refund_created_at)
             r_n = displayLargeStringWithMargin(margin,nvt.refund_note)
             invoice += '{0}\n\n'.format(r_n)
-        if nvt.sales_comments:
-            invoice += '{0}SALES COMMENTS:\n'.format(margin)
-            invoice += '{0}{1}\n\n'.format(margin,nvt.sales_comments)
-        if nvt.booth_comments:
-            invoice += '{0}BOOTH COMMENTS:\n'.format(margin)
-            invoice += '{0}{1}\n\n'.format(margin,nvt.booth_comments)
+        if nvt.company_comments:
+            invoice += '{0}COMMENTS:\n'.format(margin)
+            c_c = displayLargeStringWithMargin(margin, nvt.company_comments)
+            invoice += '{0}\n\n'.format(c_c)
 
         order_detail_format = '{:4s}{:5s} {:16s} {:50s} {:8s} {:8s}\n'
         header1 = ('','Order','Order',    'SKU','Quantity','Unit')
@@ -657,6 +658,11 @@ class NEAFVendor(AccessShopify):
             self.target_company = target_companies[int(item_num_str)-1]
             target_company_invoice = self.nv_collections.vendor_invoices[self.target_company]
         return self.target_company,target_company_invoice
+
+    def openNEAFVendorExcel(self):
+        # 11/6/2026. render self.nv_collections.neaf_ss as excel and open
+        msg = show_and_save_namedtuple_collection_as_excel(sorted(self.nv_collections.neaf_ss.values(),key=lambda nvt: nvt.last_order_date,reverse=True),'NEAF Vendor Management')
+        return msg
 
     def output_nvt_csv(self,nv_src_item):
         if nv_src_item == NEAF_VENDOR:

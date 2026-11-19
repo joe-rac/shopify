@@ -1,4 +1,4 @@
-from consts import NEAF_YEAR_DEFAULT,NEAF_ATTEND,MEMBERSHIP,CC_DOOR_PRIZE,NEAF_YEAR_2025,SATURDAY,NEAIC_ATTEND,NEAF_VENDOR,FAKE_TEST_KEY,FAKE_TEST_VALUE
+from consts import NEAF_YEAR_DEFAULT,NEAF_ATTEND,MEMBERSHIP,SF_DOOR_PRIZE,NEAF_YEAR_2025,SATURDAY,NEAIC_ATTEND,NEAF_VENDOR,FAKE_TEST_KEY,FAKE_TEST_VALUE
 from utils import showError
 from graphql_utils import get_orders_cursor_items,get_url_and_headers,mutate_custom_attributes,load_and_adjust_custom_attributes
 from neaf_vendor_utils import BADGE_ACTION,DELETE_PRIOR_EDIT_ACTION
@@ -13,7 +13,7 @@ def neaf_vendor_and_badge_csv(neaf_year=NEAF_YEAR_DEFAULT,verbose=False):
         print(neafVendor.error + '\n' + neafVendor.msg)
         return
     neafVendor.shopifyLoad()
-    msg = neafVendor.output_nvt_csv('neaf_vendor')
+    msg = neafVendor.output_nvt_csv(NEAF_VENDOR)
     print('\n'+msg)
     msg = neafVendor.output_nvt_csv('neaf_company_badge')
     print('\n'+msg)
@@ -95,25 +95,25 @@ def neaf_vendor_all_invoices(neaf_year=NEAF_YEAR_DEFAULT,as_pdf=False,verbose=Fa
 def orders_neaf_attendee_csv(verbose=False,order_to_debug=None):
     orders = Orders(NEAF_ATTEND,verbose=verbose,order_to_debug=order_to_debug)
     orders.shopifyLoad()
-    print(orders.dump_to_csv())
+    print(orders.dump_to_excel())
     return
 
 def orders_neaf_vendor_csv(verbose=False,order_to_debug=None):
     orders = Orders(NEAF_VENDOR,verbose=verbose,order_to_debug=order_to_debug)
     orders.shopifyLoad()
-    print(orders.dump_to_csv())
+    print(orders.dump_to_excel())
     return
 
 def orders_rac_membership_csv(verbose=False,order_to_debug=None):
     orders = Orders(MEMBERSHIP,verbose=verbose,order_to_debug=order_to_debug)
     orders.shopifyLoad()
-    print(orders.dump_to_csv())
+    print(orders.dump_to_excel())
     return
 
 def orders_raw_cc_door_prize_csv(verbose=False, order_to_debug=None):
-    orders = Orders(CC_DOOR_PRIZE,verbose=verbose,order_to_debug=order_to_debug)
+    orders = Orders(SF_DOOR_PRIZE, verbose=verbose, order_to_debug=order_to_debug)
     orders.shopifyLoad()
-    print(orders.dump_to_csv())
+    print(orders.dump_to_excel())
     return
 
 def NEAF_YEAR_PRIOR():
@@ -124,7 +124,7 @@ def door_prize_entrants_csv(verbose=False):
     if dp.error:
         print(showError(dp.error) + '\n' + dp.msg)
         return
-    dp.constantContactAndShopifyLoad()
+    dp.sFAndShopifyLoad()
     msg = dp.show_dicts_summary()
     msg2 = dp.show_hints_dp()
     print(f'\nshow_dicts_summary results:\n\n{msg}\n\nshow_hints_dp results:\n\n{msg2}')
@@ -135,7 +135,7 @@ def door_prize_pdf(pick_n_winners=3,verbose=False):
     if dp.error:
         print(showError(dp.error) + '\n' + dp.msg)
         return
-    dp.constantContactAndShopifyLoad()
+    dp.sFAndShopifyLoad()
     msgs = []
     for i in range(0,pick_n_winners):
         msgs.append(dp.pick_and_show_winner())

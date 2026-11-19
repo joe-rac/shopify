@@ -52,7 +52,7 @@ class NEAFVendorUI(Frame):
     def _create_widgets_small(self):
 
         vert_frame1 = STFrame(self,80,1)
-        STButton(vert_frame1, text='Save NEAF Management s/s to csv', command=self.SaveNEAFVendorSS, same_row=True)
+        STButton(vert_frame1, text='Open NEAF Management Excel', command=self.OpenNEAFVendorExcel, same_row=True)
         STButton(vert_frame1,text='Save NEAF Company/Badge s/s to csv',command=self.SaveNEAFCompanyBadgeSS,same_row=True)
         STButton(vert_frame1, text='SHOPIFY LOAD (must do this first)', command=self.ShopifyLoad, same_row=True)
         STButton(vert_frame1, text='Re-build all companies from prior SHOPIFY LOAD', command=self.BuildFromPriorShopifyLoad, same_row=True)
@@ -89,7 +89,7 @@ class NEAFVendorUI(Frame):
 
     def _create_widgets_medium(self):
         vert_frame1 = STFrame(self,100,1)
-        STButton(vert_frame1, text='Save NEAF Management s/s to csv', command=self.SaveNEAFVendorSS, same_row=True)
+        STButton(vert_frame1, text='Open NEAF Management Excel', command=self.OpenNEAFVendorExcel, same_row=True)
         STButton(vert_frame1,text='Save NEAF Company/Badge s/s to csv',command=self.SaveNEAFCompanyBadgeSS,same_row=True)
         STButton(vert_frame1, text='SHOPIFY LOAD (must do this first)', command=self.ShopifyLoad, same_row=True)
         STButton(vert_frame1, text='Re-build all companies from prior SHOPIFY LOAD', command=self.BuildFromPriorShopifyLoad, same_row=True)
@@ -129,7 +129,7 @@ class NEAFVendorUI(Frame):
 
     def _create_widgets_large(self):
         vert_frame1 = STFrame(self,100,1)
-        STButton(vert_frame1, text='Save NEAF Management s/s to csv', command=self.SaveNEAFVendorSS, same_row=True)
+        STButton(vert_frame1, text='Open NEAF Management Excel', command=self.OpenNEAFVendorExcel, same_row=True)
         STButton(vert_frame1,text='Save NEAF Company/Badge s/s to csv',command=self.SaveNEAFCompanyBadgeSS,same_row=True)
         STButton(vert_frame1, text='SHOPIFY LOAD (must do this first)', command=self.ShopifyLoad, same_row=True)
         STButton(vert_frame1, text='Re-build all companies from prior SHOPIFY LOAD', command=self.BuildFromPriorShopifyLoad, same_row=True)
@@ -178,10 +178,10 @@ class NEAFVendorUI(Frame):
             return False
         return True
 
-    def SaveNEAFVendorSS(self):
-        if not self.neafVendorIsValid('SaveNEAFVendorSS'):
+    def OpenNEAFVendorExcel(self):
+        if not self.neafVendorIsValid('OpenNEAFVendorExcel'):
             return
-        self.large_res.set(self.neafVendor.output_nvt_csv('neaf_vendor'))
+        self.large_res.set(self.neafVendor.openNEAFVendorExcel())
         return
 
     def SaveNEAFCompanyBadgeSS(self):

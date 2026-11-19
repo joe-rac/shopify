@@ -36,8 +36,8 @@ def graphql_orders_by_sku_between_dates(sku=NEAF_VENDOR,created_at_min='2025-12-
     req = req.replace('after: "END_CURSOR_HERE",', '')
 
     while True:
-        request = requests.post(url, data=req, headers=headers)
-        print(f'\nexecuted\nrequest = requests.post(url, data=req, headers=headers)\nwith\nurl:\n{url}\nreq:{req}\nheaders:{headers}\n')
+        request = requests.post(url, json={'query': req}, headers=headers)
+        print(f"\nexecuted\nrequest = requests.post(url, json={'query': req}, headers=headers)\nwith\nurl:\n{url}\nreq:{req}\nheaders:{headers}\n")
         res = json.loads(request.text)
         errors = res.get('errors')
         if errors:
@@ -68,8 +68,8 @@ def graphql_orders_between_dates(created_at_min='2025-12-02',created_at_max='202
     req = req.replace('after: "END_CURSOR_HERE",', '')
 
     while True:
-        request = requests.post(url, data=req, headers=headers)
-        print(f'\nexecuted\nrequest = requests.post(url, data=req, headers=headers)\nwith\nurl:\n{url}\nreq:{req}\nheaders:{headers}\n')
+        request = requests.post(url, json={'query': req}, headers=headers)
+        print(f"\nexecuted\nrequest = requests.post(url, json={'query': req}, headers=headers)\nwith\nurl:\n{url}\nreq:{req}\nheaders:{headers}\n")
         res = json.loads(request.text)
         errors = res.get('errors')
         if errors:
@@ -97,7 +97,7 @@ def graphql_order_by_order_id_test(order_id='6104100438098'):
     req = ORDER_BY_ORDER_ID
     req = req.replace('INSERT_ORDER_ID_HERE',order_id)
     req = req.replace('INSERT_ORDER_DETAILS_HERE',ORDER_DETAILS)
-    request = requests.post(url, data=req, headers=headers)
+    request = requests.post(url, json={'query': req}, headers=headers)
     res = json.loads(request.text)
     errors = res.get('errors')
     if errors:
@@ -108,19 +108,22 @@ def graphql_order_by_order_id_test(order_id='6104100438098'):
         print(res_str)
     return
 
-def graphql_order_by_order_num_test(name='17712'):
+def graphql_order_by_order_num_test(name='19214'):
 
     # 12/26/2024. 13695 has "Additional details" of company name edit and 2 bdage name deletes. Also has refund of booth.
     # 2/28/2025.  15569 skywatcher has 848-248-0424 in old phone_num but MISSING in new.
     #             15472 Willie Yee has SIDE DOOR in old address but missing in new.
     # 12/16/2025. 17190. Caneled order for 'Joes half assed scopes'. has 'cancelledAt': '2025-12-04T17:39:18Z'.
     # 3/10/2026.  17712. first order of neaf_vendor_booth_premium_from_standard_early_bird but before "My Company Name" added. I editted email from hqu@spectrumoi.com to hincequ@gmail.com.
+    # 10/22/2026. 18230 is simple order of NEAF electricity. I'm using it to conform json format of electricity purchase proof of concept for Peter and Preet using the
+    #                   Storefront api with headless sales channel is sufficient and full r/w access for shopify admin api is not needed.
+    #             19214 is text of storefront api proof of concept generated with purchase_electricity() function in shopify_storefront_api_experiments.py
 
     url,headers = get_url_and_headers()
     req = ORDER_BY_NAME
     req = req.replace('ORDER_NUM',name)
     req = req.replace('INSERT_ORDER_DETAILS_HERE',ORDER_DETAILS)
-    request = requests.post(url, data=req, headers=headers)
+    request = requests.post(url, json={'query': req}, headers=headers)
     res = json.loads(request.text)
     errors = res.get('errors')
     if errors:
@@ -155,13 +158,14 @@ def main():
     #graphql_orders_by_sku_between_dates()
     #graphql_orders_between_dates()
     #graphql_order_by_order_id_test()
-    #graphql_order_by_order_num_test()
+    graphql_order_by_order_num_test()
     #show_existing_custom_attribute_by_order_num()
     # 4/2/2026. inject non-conforming customAttribute of {'key': 'fake_test_key', 'value': 'fake_test_value'}
     #inject_test_custom_attribute_by_order_num()
     # 4/2/2026. delete fake badge edit {'key': 'Badge_Name_15264_4', 'value': 'Moshe Yisroel'}.
     # inject_test_custom_attribute_by_order_num(key='Badge_Name_15264_4',value=None,delete_key=True)
-    get_order_nums_from_customer_search()
+    # TODO 1022/2026. I don't know what the fuck I was planing here but I never wrote this function. Seems usefull, I should write it
+    #                 get_order_nums_from_customer_search()
     return
 
 

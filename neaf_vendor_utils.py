@@ -6,7 +6,7 @@ import datetime
 import sys
 import os
 import copy
-from consts import REFUND,DECLINED,ADMIN_API_VERSION,SHOP_NAME
+from consts import REFUND,PARTIAL_REFUND,DECLINED,SHOPIFY_API_VERSION,SHOP_NAME
 from credentials import Credentials
 from graphql_queries import MUTATE_CUSTOM_ATTRIBUTES
 from graphql_utils import mutate_custom_attributes
@@ -136,12 +136,16 @@ def confirm_no_unexpected_fields_in_properties(requested_properties,properties):
 def set_vendor_properties_tup(properties):
 
     requested_properties = {}
+
+    # 11/18/2026. company_from_property is a list because there can be multiple company names that actually refer to a single company. example is #15317 and #15705.
+    #             #15317 has 5 instances of 'Amateur Astronomers Assoc. of Pittsburgh' and 1 of 'Amateur Astronomers Assoc. of Pitt.'.
     company_from_property = getFromProperties('My Company Name',properties,requested_properties)
     if company_from_property:
         company_from_property = [company_from_property]
     else:
         company_from_property = []
 
+    company_comments = getFromProperties('Comment',properties,requested_properties)
     cellno = getFromProperties('Cell Phone',properties,requested_properties)
     name_on_badge = getFromProperties('Name on Badge',properties,requested_properties)
     badge1_name = getFromProperties('Name on 1st Badge',properties,requested_properties)
@@ -183,8 +187,8 @@ def set_vendor_properties_tup(properties):
             else:
                 no_pr_booths_from_order = int(no_pr_booths_from_order)
 
-    nvpt = NeafVendorPropertiesTup(company_from_property,cellno,name_on_badge,badge1_name,badge2_name,requested_booth_loc,get_booths_from_order,no_st_booths_from_order,no_pr_booths_from_order,
-                                   prize1,prize1_value,prize2,prize2_value,extra_badge_names,ive_reviewed_vendor_packet,error)
+    nvpt = NeafVendorPropertiesTup(company_from_property,company_comments,cellno,name_on_badge,badge1_name,badge2_name,requested_booth_loc,get_booths_from_order,no_st_booths_from_order,
+                                   no_pr_booths_from_order,prize1,prize1_value,prize2,prize2_value,extra_badge_names,ive_reviewed_vendor_packet,error)
 
     return nvpt
 
@@ -229,9 +233,6 @@ def useOrderNoteAttributeEdits(nvt):
     if not nvt.order_note_attributes:
         return nvt
 
-    onaStr = pprint.pformat(nvt.order_note_attributes, width=100)
-    print('\nEntering useOrderNoteAttributeEdits for order_num:{0}, company:{1}. Processing user requested edits of nvt.order_note_attributes of\n{2}\n'.format(nvt.order_num,nvt.company,onaStr))
-
     edit_cnt = 0
     for nvdict in nvt.order_note_attributes:
         name = nvdict[NOTE_ATTRIBUTE_KEY()]
@@ -268,6 +269,11 @@ def useOrderNoteAttributeEdits(nvt):
             edit_cnt += 1
             # we have found an order that for company that paid for NEAF during covid but has declined to show up for NEAF 2023.
             nvt = nvt._replace(declined_neaf_2023=DECLINED)
+
+        if edit_cnt:
+            onaStr = pprint.pformat(nvt.order_note_attributes, width=100)
+            msg = f'\nExiting useOrderNoteAttributeEdits for order_num:{nvt.order_num}, company:{nvt.company}. Processing user requested edits of nvt.order_note_attributes of\n{onaStr}\n'
+            print(msg)
 
     return nvt
 
@@ -322,8 +328,8 @@ def setCost(nvt,sct):
 
     price,price_presentment,currencyCode = get_price_in_shopifyCommonTup(sct)
     qty = sct.quantity
-    cost             = price             * qty
-    cost_presentment = price_presentment * qty
+    cost             = price             if sct.sku.startswith(PARTIAL_REFUND) else price             * qty
+    cost_presentment = price_presentment if sct.sku.startswith(PARTIAL_REFUND) else price_presentment * qty
 
     # total due is typically, by definition, 0 because all orders paid in full by credit card.
     # its also 0 for EDUCATION discount code since they pay nothing. Its cost for discount code CHECK since they pay nothing online but owe
@@ -379,10 +385,14 @@ def setCost(nvt,sct):
         nvt = nvt._replace(carpet = cost)
     elif sku.startswith('neaf_vendor_sponsor'):
         nvt = nvt._replace(sponsorship = cost)
-
-    elif sku.startswith(REFUND):
-        # 2/2/2023. this is sku I convert real sku to if line item was in refunded order
-        pass
+    elif sku == 'neaf_vendor_payment':
+        # 11/18/2026. example is in #15574, AstronScientific
+        nvt = nvt._replace(neaf_vendor_payment = cost)
+    elif sku == 'neaf_vendor_wire_fee':
+        # 11/19/2026. example is #19257, ToupTek Astro. has wire fee of $50 and uses discount code of WIRE to kip online payment
+        nvt = nvt._replace(wire_fee = cost)
+    elif 'refund' in sku.lower():
+        nvt = nvt._replace(refund = cost)
 
     else:
         msg = 'Unsupported sku of {0} with cost:{1}, qty:{2}'
@@ -527,10 +537,10 @@ def mergeNvts(orig_nvt, new_nvt):
     # 12/29/2022. summing means numerically adding numbers.
     keys_to_be_summed = ('booth_st_qty','booth_st','booth_prem_qty','booth_prem','upgrade_st_to_prem_qty','upgrade_st_to_prem','extra_tables_qty','extra_tables',
            'extra_chairs_qty','extra_chairs','elec','carpet','additional_badges_qty','additional_badges','wifi','shipping_box',
-           'shipping_box_qty','shipping_pallet','shipping_pallet_qty','sponsorship','donation','total_cost','total_cost_presentment')
+           'shipping_box_qty','shipping_pallet','shipping_pallet_qty','sponsorship','neaf_vendor_payment','wire_fee','refund','donation','total_cost','total_cost_presentment')
     orig_nvt = sumNvtItems(keys_to_be_summed,orig_nvt,new_nvt)
     # 12/29/2022 merging means concatenate string with "|"
-    keys_to_be_merged = ('order_id','order_num','name','orderNumber','address1','address2','address3','phone_num','cellno','email','order_note','refund_note','refund_created_at',
+    keys_to_be_merged = ('order_id','order_num','name','company_comments','orderNumber','address1','address2','address3','phone_num','cellno','email','order_note','refund_note','refund_created_at',
         'name_on_badge','badge1_name','badge2_name','extra_badge_names','get_booths_from_order','prize_donation','prize_donation_value','currencyCode',
         'donation_order_from_attribute','exclude_order_from_attribute','error')
     # 12/29/2022. all remaining items that can't be summed or merged ae handled here.

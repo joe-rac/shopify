@@ -3,14 +3,13 @@ import os
 import csv
 import copy
 from collections import namedtuple
-from consts import MEMBERSHIP,DONATION,RAD,CC_DOOR_PRIZE,NEAIC_ATTEND,NEAIC_EXHIBITOR,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAF_VENDOR,NEAF_SOLAR_STAR_PARTY,HSP,HSP_RAFFLE,RLS
-from consts import ADMIN,NEAF_ATTEND_DOOR_PRIZE,SSP,TEST,NEAF_VIRTUAL_DOORPRIZE,ALL,NEAF_VIRTUAL_DOORPRIZE_DROPDOWN
-from consts import DEFAULT_DAY
-from utils import normalizeAddress,convertToStr,get_target_dict,writerow_UnicodeEncodeError,RAC_DIR,normalize_phone_num,get_max_len
+from consts import MEMBERSHIP,DONATION,RAD,SF_DOOR_PRIZE,NEAIC_ATTEND,NEAIC_EXHIBITOR,NEAF_ATTEND,NEAF_ATTEND_RAFFLE,NEAF_VENDOR,NEAF_SOLAR_STAR_PARTY,HSP,HSP_RAFFLE,RLS
+from consts import ADMIN,NEAF_ATTEND_DOOR_PRIZE,SSP,TEST,NEAF_VIRTUAL_DOORPRIZE,ALL,NEAF_VIRTUAL_DOORPRIZE_DROPDOWN,EXCEL_REPORTS_DIR,REFUND,PARTIAL_REFUND
+from utils import normalizeAddress,convertToStr,get_target_dict,writerow_UnicodeEncodeError,RAC_DIR,normalize_phone_num,get_max_len,show_and_save_namedtuple_collection_as_excel
 from utils import getFromProperties,getPropertiesDict,OrderTup,PROPERTIES_DICT,ORDER_FIELDS_LIST,NOTE_ATTRIBUTE_KEY,CUSTOM_ATTRIBUTES_KEY
 from date_filter_utils import calc_default_date_window_from_product_type
 from access_shopify import AccessShopify
-from constant_contact import get_cc_door_prize_list
+from door_prize import get_sf_door_prize_entries_by_date_range
 
 NEAIC_FIELDS = 'firstName lastName emailAddress phone state_country admissionCnt workShopCnt paidAmount note'
 NEAIC_HEADER = ('First Name','Last Name','E-mail Address','Phone','Called','State/Country','WorkShop','Paid Amount($)','Date entered','Note')
@@ -94,7 +93,17 @@ class AccessOrders(AccessShopify):
         price = round(float(sct.line_item['originalUnitPriceSet']['shopMoney']['amount']))
         #price_presentment = round(float(sct.line_item['originalUnitPriceSet']['presentmentMoney']['amount']))
         #currencyCode = sct.line_item['originalUnitPriceSet']['presentmentMoney']['currencyCode']
-        total = price * sct.quantity
+        if sct.sku == REFUND:
+            # 11/16/2026. special treatment needed for this sku because it means refund in dollars is in price and it isn't associated with a specific product but is rather
+            #             associated with the entire deal. example is #15574. its a 21 euro refund on order of 958 eoros of neaf_vendor_payment. intent of neaf_vendor_payment is that its
+            #             unit price is $1 and quantity of 479 implies total dollars of $479. we need this fix to give corerct refund of 21 euros. without it we get gigantic invalid
+            #             refund of 479 * 21 = 10059.
+            total = price
+        elif sct.sku.startswith(PARTIAL_REFUND):
+            # 11/19/2026. example is #15574, AstronScientific. it has sku of partial_REFUND_neaf_vendor and price of -21.
+            total = price
+        else:
+            total = price * sct.quantity
         paid = None
         created_at = sct.created_at[0:10] + ' ' + sct.created_at[11:19]
         stateOrCountry = sct.province_code if sct.country_code == 'US' else sct.country_code
@@ -112,8 +121,8 @@ class Orders(object):
     # store this number of history items.
     NUM_HIST_ITEMS = 5
     # TODO 9/4/2022. add to SKUS_TO_LOAD_DICT and PRODUCT_TYPES together. when adding a new product category add here and also in SKUS_TO_LOAD_DICT in consts.py
-    PRODUCT_TYPES = (NEAF_VENDOR,NEAF_ATTEND,NEAF_ATTEND_DOOR_PRIZE,NEAF_ATTEND_RAFFLE,NEAF_SOLAR_STAR_PARTY,NEAIC_ATTEND,NEAIC_EXHIBITOR,HSP,HSP_RAFFLE,RLS,SSP,TEST,MEMBERSHIP,DONATION,RAD,
-                     CC_DOOR_PRIZE,NEAF_VIRTUAL_DOORPRIZE_DROPDOWN,ADMIN,ALL)
+    PRODUCT_TYPES = (NEAF_VENDOR, NEAF_ATTEND, NEAF_ATTEND_DOOR_PRIZE, NEAF_ATTEND_RAFFLE, NEAF_SOLAR_STAR_PARTY, NEAIC_ATTEND, NEAIC_EXHIBITOR, HSP, HSP_RAFFLE, RLS, SSP, TEST, MEMBERSHIP, DONATION, RAD,
+                     SF_DOOR_PRIZE, NEAF_VIRTUAL_DOORPRIZE_DROPDOWN, ADMIN, ALL)
 
     def set_product_type(self,product_type):
 
@@ -149,8 +158,7 @@ class Orders(object):
         self.logging = False
         self.verbose = verbose
         self.msg = ''
-        self.order_dir = os.path.join(RAC_DIR(),'orders')
-        self.results_dir = os.path.join(self.order_dir,'results')
+        self.results_dir = os.path.join(RAC_DIR(),EXCEL_REPORTS_DIR)
         if self.order_to_debug:
             self.created_at_min = None
             self.created_at_max = None
@@ -183,26 +191,27 @@ class Orders(object):
             irow.append(idict[field_name])
         return irow
 
-    def build_from_cc(self):
-        msg_cc = 'Start loading Constant Contact door prize entrants from {0} to {1}'.format(self.created_at_min,self.created_at_max)
-        print(msg_cc)
-        ccdpt_list,msg = get_cc_door_prize_list(self.created_at_min[:4],DEFAULT_DAY,raw_cc_to_csv=True)
-        msg_cc += msg
-        date_to_cc_map = {}
+    def build_from_sf(self):
+        msg_sf = "Start loading door prize entrants from Shopify form named 'NEAF Door Prize Entry' from {0} to {1}".format(self.created_at_min,self.created_at_max)
+        print(msg_sf)
+        sfdpt_list,msg,self.error = get_sf_door_prize_entries_by_date_range(self.created_at_min,self.created_at_max)
+
+        if self.error:
+            return msg_sf,{}
+        msg_sf += msg
+        date_to_sf_map = {}
         i = 1
-        for ccdpt in ccdpt_list:
+        for sfdpt in sfdpt_list:
             order_num = None
             order_id = None
-            created_at = ccdpt.modified_date
-            if created_at[:10] < self.created_at_min or created_at[:10] > self.created_at_max:
-                continue
+            created_at = sfdpt.createdAt
             created_at += '_{0:04d}'.format(i)
             i += 1
-            name = ccdpt.first_name+' '+ccdpt.last_name
+            name = sfdpt.firstName+' '+sfdpt.lastName
             address1 = address2 = address3 = stateOrCountry = ' '
-            phone_num = ccdpt.home_phone
-            email = ccdpt.email_address
-            sku = 'Constant Contact door prize'
+            phone_num = sfdpt.phoneNumber
+            email = sfdpt.email
+            sku = SF_DOOR_PRIZE
             quantity = 1
             company_name = ''
             price = 0
@@ -212,25 +221,25 @@ class Orders(object):
             paid = 0
             propertiesDict = {}
             note = ''
-            cc_order = OrderTup(order_num,order_id,company_name,created_at,name,ccdpt.first_name,ccdpt.last_name,address1,address2,address3,stateOrCountry,phone_num,
+            sf_order = OrderTup(order_num,order_id,company_name,created_at,name,sfdpt.firstName,sfdpt.lastName,address1,address2,address3,stateOrCountry,phone_num,
                                 email,sku,discount_code,quantity,discount,price,total,paid,propertiesDict,note)
-            date_to_cc_map[created_at] = cc_order
+            date_to_sf_map[created_at] = sf_order
 
         # build in date order
-        full_order_dict_cc = {}
-        dates = sorted(date_to_cc_map.keys())
+        full_order_dict_sf = {}
+        dates = sorted(date_to_sf_map.keys())
         seq = 0
         for dt in dates:
             seq += 1
             order_num = "{:05d}".format(seq)
-            cc_order = date_to_cc_map[dt]
-            cc_order = cc_order._replace(order_num=order_num,created_at=cc_order.created_at[:10])
-            full_order_dict_cc[order_num] = cc_order
+            sf_order = date_to_sf_map[dt]
+            sf_order = sf_order._replace(order_num=order_num,created_at=sf_order.created_at[:10])
+            full_order_dict_sf[order_num] = sf_order
 
-        msg = '{0} items from Constant Contact Door Prize registrations at NEAF.'.format(len(full_order_dict_cc))
+        msg = "{0} items from Shopify Form door prize registrations at NEAF.".format(len(full_order_dict_sf))
         print(msg)
-        msg_cc += '\n'+msg
-        return msg_cc,full_order_dict_cc
+        msg_sf += '\n'+msg
+        return msg_sf,full_order_dict_sf
 
     def keysFromOrderNums(self, orderDictKeys):
         keys = []
@@ -257,7 +266,7 @@ class Orders(object):
         BAD_KEY = 'confirm_RAC_&_$75_HSP'
 
         def getGoodKeyForNamedTuple(desc):
-            return desc.replace('(', '').replace(')', '').replace(' ', '_').replace('\'','').replace('*','').replace('/','_')
+            return desc.replace('(', '').replace(')', '').replace(' ', '_').replace('\'','').replace('*','').replace('/','_').replace('.','')
 
         def fixKeysInPropertiesDict(goodPropertyKeys,properties):
             propertiesWithGoodKeys = {}
@@ -315,10 +324,12 @@ class Orders(object):
             return
 
         self.full_order_dict.clear()
-        if self.product_type == CC_DOOR_PRIZE:
-            cc_msg,cc_full_order_dict = self.build_from_cc()
-            self._appendMsg(cc_msg)
-            self.full_order_dict.update(cc_full_order_dict)
+        if self.product_type == SF_DOOR_PRIZE:
+            sf_msg,sf_full_order_dict = self.build_from_sf()
+            if self.error:
+                return
+            self._appendMsg(sf_msg)
+            self.full_order_dict.update(sf_full_order_dict)
         else:
             accessOrders = AccessOrders(self.product_type,self.created_at_min,self.created_at_max,order_to_debug=self.order_to_debug,verbose=self.verbose)
             if accessOrders.error:
@@ -349,18 +360,12 @@ class Orders(object):
         self.order_keys.extend(self.keysFromOrderNums(self.order_dict.keys()))
         return
 
-    def create_dirs(self):
-        os.makedirs(self.order_dir,exist_ok=True)
-        os.makedirs(self.results_dir,exist_ok=True)
-        return
-
     def shopifyLoad(self, created_at_min=None,created_at_max=None,order_to_debug=None ):
         if self.error:
             self.error = 'Cannot run shopifyLoad. Entered this function with error:{0}'.format(self.error)
             return
 
         self.order_to_debug = order_to_debug
-        self.create_dirs()
 
         # 3/13/2023. this block uses passed in values of created_at_min and created_at_max to override values set in Orders cstr from calc_default_date_window_from_product_type.
         if created_at_min:
@@ -389,16 +394,15 @@ class Orders(object):
 
         All product types: {1}
         Current loaded product type:{2}. Can find orders of this product type by text search or all orders greater than requested date.
-
-        Folder holding all files used by this program: {3}
-        Folder holding "dump to csv" results: {4}
-        Number of orders for product type {2}:{5},  Number of raw shopify orders processed in last request:{6}
+       
+        Folder holding "dump to Excel" results: {3}
+        Number of orders for product type {2}:{4},  Number of raw shopify orders processed in last request:{5}
         
-        Choose 'Dump to csv - 1 line per item' and expand raffle products to 1 line per raffle ticket. As of 9/21/2026 only HSP raffle is applicable. 
+        Choose 'Dump to Excel - 1 line per item' and expand raffle products to 1 line per raffle ticket. As of 9/21/2026 only HSP raffle is applicable. 
 
+        {6}
         {7}
         {8}
-        {9}
     ---------------------------------------------------------------------------------------------------------------------
         '''
 
@@ -410,7 +414,7 @@ class Orders(object):
         allProductTypes = ', '.join(Orders.PRODUCT_TYPES)
         numRawShopify = len(self.full_order_dict)
 
-        return hints.format(self.created_at_min,allProductTypes,self.product_type,self.order_dir,self.results_dir,numRawShopify,shopifyCnt,refundNotesStr,msgStr,errStr)
+        return hints.format(self.created_at_min,allProductTypes,self.product_type,self.results_dir,numRawShopify,shopifyCnt,refundNotesStr,msgStr,errStr)
 
     def append_row(self,msgs,fmt,cnt,k,created_at,name,company,address,phone_num,email,sku,discount_code,quantity,price,total,paid,note):
         cnt = str(cnt)+'.' if cnt != '' else ''
@@ -429,7 +433,7 @@ class Orders(object):
 
     def show_order_dict(self,order_dict):
 
-        # save requested order_dict to be displayed here in self.order_dict in preparation to save to csv with dump_to_csv
+        # save requested order_dict to be displayed here in self.order_dict in preparation to save to excel with dump_to_excel
         # 2/6/2025. show_order_dict and show_ShopifyCommonTup_list have a similar design concept. They both set column widths to minimum needed to display data.
 
         if not order_dict and not self.error:
@@ -550,10 +554,6 @@ class Orders(object):
             fname = os.path.join(self.results_dir,prefix+self.product_type+'_'+timestr+'.csv')
         return fname
 
-    def email_management_csv_fname(self):
-        timestr = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        fname = os.path.join(self.results_dir,'email_management_'+timestr+'.csv')
-        return fname
 
     def get_latest_neaic_order_number(self):
         error = ''
@@ -630,7 +630,7 @@ class Orders(object):
             return new_note
 
         if self.product_type != NEAIC_ATTEND:
-            msg = "Cannot use 'NEAIC attendee report, Dump to csv' with product type '{0}'. Can only use with product type '{1}'.\n".format(self.product_type,NEAIC_ATTEND)
+            msg = "Cannot use 'NEAIC attendee report, Dump to Excel' with product type '{0}'. Can only use with product type '{1}'.\n".format(self.product_type,NEAIC_ATTEND)
             return msg
 
         if incremental_since_last_run:
@@ -704,30 +704,29 @@ class Orders(object):
 
         return msg
 
-    def dump_to_csv(self):
+    def dump_to_excel(self):
 
-        # 2/26/2022. previously in build_full_order_with_properties_dict we built self.full_order_with_properties_dict for save to csv here.
+        # 2/26/2022. previously in self.build_full_order_with_properties_dict() we populated self.full_order_with_properties_dict for save to Excel here.
 
         if not self.full_order_with_properties_dict:
-            msg = "Failure dumping csv file in self.dump_to_csv(). self.full_order_with_properties_dict was not yet populated inside self.shopifyLoad(). Do 'SHOPIFY LOAD (must do this first)'."
+            msg = "Failure dumping excel file in self.dump_to_excel(). self.full_order_with_properties_dict was not yet populated inside self.shopifyLoad(). Do 'SHOPIFY LOAD (must do this first)'."
             return msg
 
-        fname = self.csv_fname()
-        with open(fname,'w',encoding="utf-8-sig") as csv_file:
-            wr = csv.writer(csv_file,  quoting=csv.QUOTE_ALL, lineterminator='\n') # delimiter=' ',quotechar='|', quoting=csv.QUOTE_MINIMAL, lineterminator='\n')
-            wr.writerow(self.orderWithPropertiesList)
-            for key in reversed(self.order_keys):
-                member  = self.full_order_with_properties_dict[key]
-                mrow = self.get_row(self.orderWithPropertiesList,member)
-                writerow_UnicodeEncodeError(wr,mrow)
-
-        msg = 'Find results for {0} orders at {1} .'.format(len(self.order_dict),fname)
+        if not self.product_type:
+            # TODO 11/14/2026. this block hit when running test cases. might need one more condition if date range specified.
+            if self.order_to_debug:
+                prefix = 'order_' if self.order_to_debug and len(self.order_to_debug.split('|')) == 1 else 'orders_'
+                order_to_debug = self.order_to_debug.replace('|','_')
+                description = prefix + order_to_debug
+        else:
+            description = self.product_type
+        msg = show_and_save_namedtuple_collection_as_excel([self.full_order_with_properties_dict[key] for key in reversed(self.order_keys)],description)
         return msg
 
     def dump_to_csv_1_line_per_item(self):
 
         # previously we saved order_dict displayed in show_order_dict in self.order_dict for saving to csv here.
-        # however dump here is different then dump in dump_to_csv. create 1 line per item. uses are:
+        # however dump here is different then dump in dump_to_excel. create 1 line per item. uses are:
         # 1) building list for selecting winners on neaf virtual door prize
         # 2) selecting winners for HSP raffle where you have product variants where you can buy more than 1 ticket.
         # 3) selecting winners for NEAF raffle where you have product variants where you can buy more than 1 ticket.
@@ -786,8 +785,17 @@ class Orders(object):
             return ''
         return em_list[i]
 
+
+
     def dump_to_email_management_csv(self):
+
         # glob neaf_attendees_and_door_prize neaf_vendors neaic_attendees memberships ssp dinner
+
+        def email_management_csv_fname():
+            timestr = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+            fname = os.path.join(self.results_dir,'email_management_'+timestr+'.csv')
+            return fname
+
         eMDict = EmailManagementTup({},{},{},{},{},{},{})
         i = 0
         for k,v in self.full_order_dict.items():
@@ -799,10 +807,10 @@ class Orders(object):
             sku = v.sku
             if not eMDict.glob.get(email):
                 eMDict.glob[email] = True
-            if sku.startswith('Constant Contact') or sku.startswith('neaf_attend'):
+            if sku == SF_DOOR_PRIZE or sku.startswith('neaf_attend'):
                 if not eMDict.neaf_attendees_and_door_prize.get(email):
                     eMDict.neaf_attendees_and_door_prize[email] = True
-            elif sku.startswith('neaf_vendor'):
+            elif sku.startswith(NEAF_VENDOR):
                 if not eMDict.neaf_vendors.get(email):
                     eMDict.neaf_vendors[email] = True
             elif sku.startswith('neaic_attend'):
@@ -841,7 +849,7 @@ class Orders(object):
             emItem = EmailManagementTup(glob,neaf_attendees_and_door_prize,neaf_vendors,neaic_attendees,memberships,ssp,dinner)
             emListCsv.append(emItem)
 
-        fname = self.email_management_csv_fname()
+        fname = email_management_csv_fname()
         with open(fname,'w',encoding="utf-8-sig") as csv_file:
             wr = csv.writer(csv_file, quoting=csv.QUOTE_ALL,lineterminator='\n')
             wr.writerow(EMAIL_MANAGEMENT_HEADER)
@@ -885,7 +893,7 @@ def main():
     m = None
     product_type = None
     while True:
-        print('\n\n5:dump to csv   6:show_dicts   7:debug on   8:debug off   9:hints   11*<...>:number of address rows   12*<product type>   13:email management csv')
+        print('\n\n5:dump to Excel   6:show_dicts   7:debug on   8:debug off   9:hints   11*<...>:number of address rows   12*<product type>   13:email management csv')
         msg = '0:stop   3*<...>:orders by search   10:SHOPIFY LOAD (must do this first)  \n\nEnter Here ----->'
         optionstr = input(msg.format(m.created_at_min))
         option,search_for = process_option(optionstr)
@@ -908,7 +916,7 @@ def main():
             print(msg)
             continue
         elif option == 5:
-            print(m.dump_to_csv())
+            print(m.dump_to_excel())
             continue
         elif option == 6:
             print(m.show_dicts())

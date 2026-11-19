@@ -1,7 +1,7 @@
 import copy
 from consts import NEAF_VENDOR,NEAF_YEAR_COVID,COVID_NEAF_VENDOR_SKUS_TO_EXCLUDE,COVID_NEAF_VENDOR_SKUS_TO_EXCLUDE_CONDITIONALLY
-from consts import VIRTUAL_NEAF_ORDER_RANGE,NEAF_ATTEND,NEAF_VIRTUAL_DOORPRIZE,N_A,MISSING,REFUND
-from utils import get_max_len,getItem,NOTE_ATTRIBUTE_KEY,CUSTOM_ATTRIBUTES_KEY,getCurrencySymbolFromCode
+from consts import VIRTUAL_NEAF_ORDER_RANGE,NEAF_ATTEND,NEAF_VIRTUAL_DOORPRIZE,N_A,MISSING,PARTIAL_REFUND
+from utils import get_max_len,getItem,NOTE_ATTRIBUTE_KEY,CUSTOM_ATTRIBUTES_KEY,getCurrencySymbolFromCode,get_sku_category
 
 def skipExcludedCovidSkuOrders(neaf_year_raw,sku_key,sku,customer,created_at,order_num,excludedCovidSkuOrdersDict):
 
@@ -236,11 +236,22 @@ def get_ShopifyCommonTup_highest_price(order_num,sctList):
             break
     return sct
 
-def convert_ShopifyCommonTup_to_refund(moneyRefunded, sct):
+def convert_ShopifyCommonTup_to_deal_refund(moneyRefunded, sct):
+
+    """
+    11/16/2026. Typical refunds are for specific lineitems. this refund is for dollars of refund applied to entire deal. examples are #15774 for 21 euros and #15317 for $306.
+                Notice we set current_quantity and quantity to 0 since deal level refunds are just dollars.
+    """
+
+    def get_partial_refund_sku(sku):
+        return f"{PARTIAL_REFUND}_{get_sku_category(sku)}"
+
     presentmentRefunded = moneyRefunded['presentment']
     shopRefunded        = moneyRefunded['shop']
     sct = copy.deepcopy(sct)
-    sct = sct._replace(sku=REFUND,discount_allocations=0.0,discount_codes='',total_discounts=0.0, created_at=sct.refund_created_at)
+
+    partial_refund_sku = get_partial_refund_sku(sct.sku)
+    sct = sct._replace(sku=partial_refund_sku,discount_allocations=0.0,discount_codes='',total_discounts=0.0, created_at=sct.refund_created_at, quantity=0)
     li = sct.line_item
 
     li['discountedTotalSet']['shopMoney']['amount']            = str(shopRefunded)
@@ -253,13 +264,13 @@ def convert_ShopifyCommonTup_to_refund(moneyRefunded, sct):
     li['discountedUnitPriceSet']['presentmentMoney']['amount'] = str(presentmentRefunded)
 
 # 2/7/2025. defaults to clear out line item
-    li['sku'] = REFUND
+    li['sku'] = partial_refund_sku
     li['total_discount'] = '0.00'
     li['total_discount_set'] = {}
     li['tax_lines'] = []
     li['discount_allocations'] = []
-    li['current_quantity'] = 1
-    li['quantity'] = 1
+    li['current_quantity'] = 0
+    li['quantity'] = 0
     li['price_set'] = {}
     li['id'] = 0
     li['admin_graphql_api_id'] = ''

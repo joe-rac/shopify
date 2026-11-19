@@ -14,16 +14,18 @@ import csv
 import pytz
 import datetime
 import inspect
+import tempfile
 # install with
 # pip install python-dateutil
 # use pip3 on mac
 from dateutil import parser
 from datetime import date
 from collections import namedtuple
-from openpyxl import load_workbook
+from openpyxl import load_workbook,Workbook
+from openpyxl.styles import Alignment
 
 import consts
-from consts import MISSING,N_A,CURRENCY_SYMBOL_FROM_CODE
+from consts import MISSING,N_A,CURRENCY_SYMBOL_FROM_CODE,SF_DOOR_PRIZE,EXCEL_REPORTS_DIR,SKU_CATEGORIES
 eastern_zone = pytz.timezone("US/Eastern")
 utc_format = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -61,8 +63,8 @@ NEAF_VENDOR_FIELDS = 'order_num created_at sku quantity CONFIRM_NOTE '\
     'email booth_st_qty booth_st booth_prem_qty booth_prem '\
     'upgrade_st_to_prem_qty upgrade_st_to_prem get_booths_from_order sent_booths_to_orders no_st_booths_from_order no_pr_booths_from_order '\
     'extra_tables_qty extra_tables extra_chairs_qty extra_chairs elec carpet additional_badges_qty additional_badges wifi shipping_box '\
-    'shipping_pallet sponsorship donation donation_order_from_attribute exclude_order_from_attribute declined_neaf_2023 prize_donation prize_donation_value '\
-    'currencyCode total_cost  paid total_due check_number total_discounts discount_codes booth_comments sales_comments order_note error '\
+    'shipping_pallet sponsorship neaf_vendor_payment wire_fee refund donation donation_order_from_attribute exclude_order_from_attribute declined_neaf_2023 prize_donation prize_donation_value '\
+    'currencyCode total_cost paid total_due check_number total_discounts discount_codes company_comments order_note error '\
     'total_cost_presentment paid_presentment total_due_presentment total_discounts_presentment '\
     'shipping_box_qty shipping_pallet_qty order_num_to_donation_map order_note_attributes order_id refund_note refund_created_at '\
     'name_on_badge badge1_name badge2_name extra_badge_names badge_names_orig badge_entitled_cnt badge_names '\
@@ -88,11 +90,11 @@ LARGE = 'LARGE'
 def _neaf_ss_fields():
     return NEAF_VENDOR_FIELDS[NEAF_VENDOR_FIELDS.index('company last_order_date'):NEAF_VENDOR_FIELDS.index('error')+5]
 NeafSSTup = namedtuple('NeafSSTup', _neaf_ss_fields())
-NEAF_VENDOR_PROPERTIES_FIELDS = 'company_from_property cellno name_on_badge badge1_name badge2_name requested_booth_loc get_booths_from_order no_st_booths_from_order no_pr_booths_from_order '\
-                                'prize1 prize1_value prize2 prize2_value extra_badge_names ive_reviewed_vendor_packet error'
+NEAF_VENDOR_PROPERTIES_FIELDS = ('company_from_property company_comments cellno name_on_badge badge1_name badge2_name requested_booth_loc get_booths_from_order no_st_booths_from_order '
+                                 'no_pr_booths_from_order prize1 prize1_value prize2 prize2_value extra_badge_names ive_reviewed_vendor_packet error')
 NeafVendorPropertiesTup = namedtuple('NeafVendorPropertiesTup',NEAF_VENDOR_PROPERTIES_FIELDS)
 
-DoorPrizeSrcDicts = namedtuple('DoorPrizeSrcDicts', 'winner cc cc_reject shopify')
+DoorPrizeSrcDicts = namedtuple('DoorPrizeSrcDicts', 'winner sf sf_reject shopify')
 DoorPrizeResDicts = namedtuple('DoorPrizeResDicts', 'eligible reject')
 NEAF_VENDOR_COLLECTIONS_FIELDS = 'raw neaf_ss full vendor_invoices vendor_last_order_date_map last_order_date_vendors_map company_badge'
 NeafVendorCollectionsTup = namedtuple('NeafVendorCollectionsTup', NEAF_VENDOR_COLLECTIONS_FIELDS)
@@ -219,14 +221,21 @@ def convert_utc_to_local_datetime(utc_dtime_str):
     local_dtime_str = datetime.datetime.strftime(eastern_datetime, '%Y-%m-%dT%H:%M:%S')
     return local_dtime_str
 
-def utc_for_midnight_local(dt):
-    dt_time = dt + 'T00:00:00'
-    midnight = datetime.datetime.strptime(dt_time,'%Y-%m-%dT%H:%M:%S')
-    etz = pytz.timezone("US/Eastern")
-    etz_datetime = etz.localize(midnight)
-    utc_datetime = etz_datetime.astimezone(pytz.utc)
-    utc_str = datetime.datetime.strftime(utc_datetime,'%Y-%m-%dT%H:%M:%SZ')
-    return utc_str
+def utc_for_start_of_day_local(dt):
+    dt_time = dt + 'T00:00:01'
+    local_datetime = datetime.datetime.strptime(dt_time, '%Y-%m-%dT%H:%M:%S')
+    etz = pytz.timezone('US/Eastern')
+    local_datetime = etz.localize(local_datetime)
+    utc_datetime = local_datetime.astimezone(pytz.utc)
+    return datetime.datetime.strftime(utc_datetime, '%Y-%m-%dT%H:%M:%SZ')
+
+def utc_for_end_of_day_local(dt):
+    dt_time = dt + 'T23:59:59'
+    local_datetime = datetime.datetime.strptime(dt_time, '%Y-%m-%dT%H:%M:%S')
+    etz = pytz.timezone('US/Eastern')
+    local_datetime = etz.localize(local_datetime)
+    utc_datetime = local_datetime.astimezone(pytz.utc)
+    return datetime.datetime.strftime(utc_datetime, '%Y-%m-%dT%H:%M:%SZ')
 
 def delta_on_date_str(dtstr,days):
     dt = date.fromisoformat(dtstr)
@@ -495,41 +504,41 @@ def read_door_prize_file(fname, neaf_year, neaf_day_of_week, verbose, exit_messa
     door_prize_dict = build_door_prize_dict_from_file(fname,verbose,exit_message)
     return door_prize_dict,fname
 
-def build_door_prize_cc_dict(ccdpt_list, door_prize_dict, verbose):
+def build_door_prize_sf_dict(sfdpt_list, door_prize_dict, verbose):
 
-    # ccdpt_list is list of CcDoorPrizeTup namedtuples from constant contact already filtered by date.
-    # check email addresses in ccdpt_list. if any exist in door_prize_dict don't add item to door_prize_cc_dict.
+    # sfdpt_list is list of SfDoorPrizeTup namedtuples from shopify form named 'NEAF Door Prize Entry' with form ID 1175570 already filtered by date.
+    # check email addresses in sfdpt_list. if any exist in door_prize_dict don't add item to door_prize_sf_dict.
     # if logging on, display those rejected items.
     # modify sku in rejected list to indicate reason for rejection. Only current reason for rejection is already in shopify.
 
     emails_in_door_prize_dict = get_emails_in_door_prize_dict(door_prize_dict)
-    door_prize_cc_dict = {}
-    door_prize_cc_reject_dict = {}
+    door_prize_sf_dict = {}
+    door_prize_sf_reject_dict = {}
     cnt = 0
     cnt_rej = 0
-    for ccdpt in ccdpt_list:
+    for sfdpt in sfdpt_list:
 
-        cc_name = ccdpt.first_name+' '+ccdpt.last_name
-        e_dpt = emails_in_door_prize_dict.get(ccdpt.email_address)
+        sf_name = sfdpt.firstName+' '+sfdpt.lastName
+        e_dpt = emails_in_door_prize_dict.get(sfdpt.email)
         if e_dpt:
             if verbose:
-                msg = 'Rejecting Constant Contact door prize entry email:{0}, name:{1} because Shopify order {2}, name:{3} has same email address.'
-                print(msg.format(ccdpt.email_address,cc_name,e_dpt.order_num,e_dpt.email))   
+                msg = "Rejecting Shopify form  'NEAF Door Prize Entry' email:{0}, name:{1} because Shopify order {2}, name:{3} has same email address."
+                print(msg.format(sfdpt.email,sf_name,e_dpt.order_num,e_dpt.email))
             cnt_rej += 1
-            key = 'cc_rej{:0>3d}'.format(cnt_rej)
-            cc_sku = 'cc_rej:email_matches_shopify'            
+            key = 'sf_rej{:0>3d}'.format(cnt_rej)
+            sf_sku = 'sf_rej:email_matches_shopify'
         else:    
             cnt += 1
-            key = 'cc{:0>4d}'.format(cnt)
-            cc_sku = 'cc_door_prize'
+            key = 'sf{:0>4d}'.format(cnt)
+            sf_sku = SF_DOOR_PRIZE
 
-        dpt = DoorPrizeTup(key, N_A, ccdpt.modified_date, cc_name, ccdpt.home_phone, ccdpt.email_address, cc_sku, '1', None)
+        dpt = DoorPrizeTup(key, N_A, sfdpt.createdAt, sf_name, sfdpt.phoneNumber, sfdpt.email, sf_sku, '1', None)
         if e_dpt:
-            door_prize_cc_reject_dict[key] = dpt    
+            door_prize_sf_reject_dict[key] = dpt
         else:      
-            door_prize_cc_dict[key] = dpt
+            door_prize_sf_dict[key] = dpt
             
-    return door_prize_cc_dict,door_prize_cc_reject_dict
+    return door_prize_sf_dict,door_prize_sf_reject_dict
 
 def normalizeAddress(default_address):
 
@@ -648,9 +657,81 @@ def build_startup_parameters(argv):
     spt = StartupParameters(**sptdict)
     return spt
 
+def get_sku_category(sku):
+    for scat in SKU_CATEGORIES:
+        if scat in sku:
+            return scat
+    return MISSING
+
 def nvtDesc(nvt):
     msg = 'NeafVendorTup -- order_num:{0} name:{1} company:{2}|(from_attribute):{3}|(from_property):{4} sku:{5} email:{6}'
     msg = msg.format(nvt.order_num,nvt.name,nvt.company,nvt.company_from_attribute,nvt.company_from_property,nvt.sku,nvt.email)
+    return msg
+
+def show_and_save_namedtuple_collection_as_excel(namedtuple_collection, description, column_is_text=()):
+
+    if not namedtuple_collection:
+        return 'namedtuple collection is empty.'
+
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+    base_name = description.lower().replace(' ', '_')
+    filename = f'{base_name}_{timestamp}.xlsx'
+    excel_reports_dir = os.path.join(RAC_DIR(), EXCEL_REPORTS_DIR)
+    os.makedirs(excel_reports_dir, exist_ok=True)
+    fname = os.path.join(excel_reports_dir, filename)
+
+    if isinstance(namedtuple_collection, dict):
+        namedtuple_list = list(namedtuple_collection.values())
+        collection_type = 'dictionary'
+    else:
+        namedtuple_list = namedtuple_collection
+        collection_type = 'list'
+
+    first_item = namedtuple_list[0]
+    if not (isinstance(first_item, tuple) and hasattr(first_item, '_fields')):
+        raise TypeError(f'show_and_save_namedtuple_collection_as_excel requires namedtuple items. First item is type {type(first_item).__name__}.')
+    namedtuple_name = type(first_item).__name__
+
+    msg = f'Creating Excel file of {fname}.\n'
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = description
+
+    header = []
+    force_as_text_indices = []
+    for i,field in enumerate(first_item._fields):
+        if field in column_is_text:
+            force_as_text_indices.append(i)
+        header.append(field.replace('_',' '))
+
+    ws.append(header)
+    ws.freeze_panes = 'A2'
+
+    for item in namedtuple_list:
+        ws.append(list(item))
+
+    # 11/10/2026. treat any columns named in kwarg of column_is_text as text
+    for force_as_text_index in force_as_text_indices:
+        for row_num in range(2,ws.max_row + 1):
+            cell = ws.cell(row=row_num,column=force_as_text_index+1)
+            cell.value = str(cell.value)
+            cell.number_format = '@'
+            cell.quotePrefix = True
+
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value == MISSING:
+                cell.alignment = Alignment(horizontal='right')
+
+    for column_cells in ws.columns:
+        max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column_cells)
+        ws.column_dimensions[column_cells[0].column_letter].width = max_length + 2
+
+    wb.save(fname)
+    os.startfile(fname)
+
+    msg += f'Opened {description}namedtuple {collection_type} of {namedtuple_name} namedtuples in Excel with {len(namedtuple_collection)} items and {len(first_item)} columns.'
     return msg
 
 def load_franks_rac_membership_spreadsheet(fname):

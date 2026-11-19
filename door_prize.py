@@ -3,19 +3,125 @@ import os
 import datetime
 import random
 import tracemalloc
+import requests
+import io
+import re
+from openpyxl import Workbook
+from collections import namedtuple
 from consts import NEAF_DATES,DOOR_PRIZE,DEFAULT_DAY,SATURDAY,SUNDAY,NEAF_YEAR_DEFAULT,MISSING
-from utils import RAC_DIR,build_door_prize_cc_dict,DICT_DELIMITER_FRONT
+from credentials import Credentials
+from utils import RAC_DIR,build_door_prize_sf_dict,DICT_DELIMITER_FRONT,convert_utc_to_local_datetime
 from utils import show_dict,read_door_prize_file,DOOR_PRIZE_HEADER,write_door_prize_file,DoorPrizeSrcDicts,DoorPrizeResDicts
-from utils import show_paths_and_files_dp,DOOR_PRIZE_WINNER,DoorPrizeTup
-from date_filter_utils import calc_date_items_from_neaf_year_and_day
+from utils import show_paths_and_files_dp,DOOR_PRIZE_WINNER,DoorPrizeTup,appendMsg
+from date_filter_utils import calc_date_items_from_neaf_year_and_day,get_neaf_dates_from_neaf_year_and_day
 from graphql_utils import get_url_and_headers
 from pdf_utils import build_winners_pdf
-from constant_contact import get_cc_door_prize_list
 from access_shopify import AccessShopify
+
+SF_DOOR_PRIZE_FIELDS = 'createdAt type formInstanceId email firstName lastName phoneNumber'
+SfDoorPrizeTup = namedtuple('SfDoorPrizeTup', SF_DOOR_PRIZE_FIELDS)
 
 def get_random_in_range(max_num):
     winner = random.randint(0, max_num - 1)
     return winner
+
+def get_sf_door_prize_entries_by_date_range(created_at_min, created_at_max):
+
+    # 10/15/2026. get all door prize entries, in requested date range, created by Shopify Form(sf) named 'NEAF Door Prize Entry' with form ID 1175570.
+    #             url for form is https://rockland-astronomy-club.myshopify.com/pages/neaf-door-prize-entry .
+
+    def date_valid(dt,date_name):
+        error = ''
+        try:
+            datetime.datetime.strptime(dt, '%Y-%m-%d')
+        except:
+            error = f"{date_name} of {dt} not string in valid form of YYYY-MM-DD."
+        return error
+
+    msg = ''
+    error = ''
+    sf_door_prize_list = []
+    error = date_valid(created_at_min,'created_at_min')
+    if error:
+        return sf_door_prize_list,msg,error
+    error = date_valid(created_at_max,'created_at_max')
+    if error:
+        return sf_door_prize_list,msg,error
+    if created_at_min > created_at_max:
+        error = f"created_at_min:{created_at_min} and created_at_max:{created_at_max} are incompatible. created_at_min must be less than or equal to created_at_max."
+        return sf_door_prize_list,msg,error
+    today_str = datetime.date.today().strftime('%Y-%m-%d')
+    if created_at_min > today_str:
+        error = f"created_at_min:{created_at_min} is invalid. Must be less than or equal to today of {today_str}."
+        return sf_door_prize_list,msg,error
+
+    sheet_id = Credentials().GOOGLE_SHEETS_NEAF_DOOR_PRIZE_ID
+
+    try:
+        html = requests.get(f'https://docs.google.com/spreadsheets/d/{sheet_id}/edit').text
+        sheet_name = re.search(r'<title>(.*?)</title>', html).group(1)
+    except:
+        error = 'Failed loading html representation of NEAF Door Prize entry google sheet.'
+        return sf_door_prize_list,msg,error
+
+    msg = f"Load '{sheet_name}' and parse all entries from {created_at_min} and {created_at_max}."
+
+    url = f'https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0'
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.RequestException as ex:
+        error = f'Failed loading NEAF Door Prize Google Sheet.\n{ex}'
+        return sf_door_prize_list,msg,error
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    for row in rows:
+        gsdp = SfDoorPrizeTup(**row)
+        createdAt = convert_utc_to_local_datetime(gsdp.createdAt)
+        if not (created_at_min <= createdAt[:10] <= created_at_max):
+            continue
+        gsdp = gsdp._replace(createdAt=createdAt)
+        sf_door_prize_list.append(gsdp)
+    msg += '\n' + f"Loaded {len(rows)} rows. {len(sf_door_prize_list)} rows are within date range and will be returned."
+
+    return sf_door_prize_list,msg,error
+
+def build_raw_sf_to_excel(sf_door_prize_list):
+    fname = os.path.join(RAC_DIR(),'door_prize','raw_sf.xlsx')
+    os.makedirs(os.path.dirname(fname),exist_ok=True)
+
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = 'NEAF Door Prize'
+        ws.append(SF_DOOR_PRIZE_FIELDS.split())
+        for sfdpt in sf_door_prize_list:
+            ws.append(list(sfdpt))
+        wb.save(fname)
+
+    except Exception as ex:
+        error = appendMsg(f"\nShopify Form 'NEAF Door Prize Entry' raw data dump to Excel failed with exception:\n{ex}")
+        return '',error
+
+    return appendMsg(f"Shopify Form 'NEAF Door Prize Entry' raw data dump of {len(sf_door_prize_list)} rows, {len(SF_DOOR_PRIZE_FIELDS.split())} columns at {fname}."),''
+
+def get_sf_door_prize_list(neaf_year, neaf_day, raw_sf_to_excel=False, verbose=False):
+
+    # 10/16/2026 XXX this function is public interface to return all door prize entries create with Shopify Form named 'NEAF Door Prize Entry' with form ID 1175570.
+    #                url for form is https://rockland-astronomy-club.myshopify.com/pages/neaf-door-prize-entry .
+
+    neaf_year_int,neaf_year_default_int,today,neaf_start,neaf_end,neaf_start_dow,neaf_end_dow,msg,msg_ex = \
+        get_neaf_dates_from_neaf_year_and_day(neaf_year, neaf_day, 'get_sf_door_prize_list')
+    if msg_ex:
+        return [],msg,msg_ex
+
+    sf_door_prize_list,msg,error = get_sf_door_prize_entries_by_date_range(neaf_start,neaf_end)
+    if error:
+        return [],msg,error
+    if raw_sf_to_excel:
+        msg2,error = build_raw_sf_to_excel(sf_door_prize_list)
+        msg = appendMsg(msg,msg2,print_new_msg=False)
+
+    return sf_door_prize_list,msg,error
 
 class DoorPrize(AccessShopify):
 
@@ -56,10 +162,10 @@ class DoorPrize(AccessShopify):
 
         return
 
-    def build_eligible_door_prize_dict(self,door_prize_winner_dict, door_prize_cc_dict, door_prize_dict):
+    def build_eligible_door_prize_dict(self,door_prize_winner_dict, door_prize_sf_dict, door_prize_dict):
         door_prize_eligible_dict = {}
         door_prize_reject_dict = {}
-        for k, v in door_prize_cc_dict.items():
+        for k, v in door_prize_sf_dict.items():
             if door_prize_winner_dict.get(k):
                 continue
             door_prize_eligible_dict[k] = v
@@ -73,9 +179,10 @@ class DoorPrize(AccessShopify):
             door_prize_eligible_dict[k] = v
         return door_prize_eligible_dict, door_prize_reject_dict
 
-    def constantContactAndShopifyLoad(self):
+    def sFAndShopifyLoad(self):
 
-        # 12/30/2022. load from shopify and populate all in-memory representations needed for full functionality.
+        # 10/16/2022. load from Shopify Form named 'NEAF Door Prize Entry' with form ID 1175570 and standard shopify NEAF orders and populate
+        #             all in-memory representations needed for full functionality.
 
         self.msg = ''
         now = datetime.datetime.now()
@@ -85,18 +192,18 @@ class DoorPrize(AccessShopify):
             if minutes < 15.0:
                 # if last load was less than 15 minutes ago skip load and use last results.
                 plt = self.prev_load_time.strftime('%H:%M:%S')
-                self.msg = 'Inside constantContactAndShopifyLoad(...) skipping re-load of data because last load was less than 15 minutes ago. It was {0:.1f} minutes ago at {1}.'
+                self.msg = 'Inside sFAndShopifyLoad(...) skipping re-load of data because last load was less than 15 minutes ago. It was {0:.1f} minutes ago at {1}.'
                 self.msg = self.msg.format(minutes, plt)
                 print(self.msg)
                 return
 
         if self.error:
-            self.error = 'Cannot run DoorPrize.constantContactAndShopifyLoad(). DoorPrize has pre-existing error:\n{0}'.format(self.error)
+            self.error = 'Cannot run DoorPrize.sFAndShopifyLoad(). DoorPrize has pre-existing error:\n{0}'.format(self.error)
             return
         # 12/30/2022. shopifyOrdersFromHttps populates self.rawOrdersTupList with raw shopify data from their webservice.
         self.shopifyOrdersFromGraphQL()
         if self.error:
-            self.error = 'Failure in DoorPrize.constantContactAndShopifyLoad().\n{0})'.format(self.error)
+            self.error = 'Failure in DoorPrize.sFAndShopifyLoad().\n{0})'.format(self.error)
             return
 
         # 12/30/2022. convertShopifyOrdersToRacOrders populates self.raw from self.rawOrdersTupList which was built in shopifyOrdersFromHttps.
@@ -105,16 +212,18 @@ class DoorPrize(AccessShopify):
         door_prize_winner_dict, self.fname = read_door_prize_file(DOOR_PRIZE_WINNER, self.neaf_year, self.neaf_day_of_week, self.verbose)
         door_prize_dict = self.raw
 
-        # 3/9/2026: XXX IMPORTANT:
-        #               Time/day filtering for Constant Contact entries happens only in get_cc_door_prize_list().
-        #               Do not duplicate that filtering in build_door_prize_cc_dict() or anywhere else.
-        ccdpt_list,msg = get_cc_door_prize_list(self.neaf_year,self.neaf_day_of_week, verbose=self.verbose)
+        # 10/15/2026: XXX IMPORTANT:
+        #                 Time/day filtering for shopify form data from 'NEAF Door Prize Entry' happens only in get_sf_door_prize_list(...).
+        #                 Do not duplicate that filtering in build_door_prize_sf_dict() or anywhere else.
+        sfdpt_list,msg,self.error = get_sf_door_prize_list(self.neaf_year, self.neaf_day_of_week, verbose=self.verbose)
+        if self.error:
+            return
 
-        door_prize_cc_dict, door_prize_cc_reject_dict = build_door_prize_cc_dict(ccdpt_list, self.raw, self.verbose)
+        door_prize_sf_dict, door_prize_sf_reject_dict = build_door_prize_sf_dict(sfdpt_list, self.raw, self.verbose)
 
-        door_prize_eligible_dict, door_prize_reject_dict = self.build_eligible_door_prize_dict(door_prize_winner_dict,door_prize_cc_dict,door_prize_dict)
+        door_prize_eligible_dict, door_prize_reject_dict = self.build_eligible_door_prize_dict(door_prize_winner_dict,door_prize_sf_dict,door_prize_dict)
 
-        for trg,src in ((self.dpSrc.winner,door_prize_winner_dict),(self.dpSrc.cc,door_prize_cc_dict),(self.dpSrc.cc_reject,door_prize_cc_reject_dict),(self.dpSrc.shopify,door_prize_dict)):
+        for trg,src in ((self.dpSrc.winner,door_prize_winner_dict),(self.dpSrc.sf,door_prize_sf_dict),(self.dpSrc.sf_reject,door_prize_sf_reject_dict),(self.dpSrc.shopify,door_prize_dict)):
             trg.clear()
             trg.update(src)
 
@@ -124,20 +233,20 @@ class DoorPrize(AccessShopify):
 
         self.prev_load_time = datetime.datetime.now()
 
-        print('memory usage at exit from DoorPrize.constantContactAndShopifyLoad after all loading is done : {0}'.format(tracemalloc.get_traced_memory()))
+        print('memory usage at exit from DoorPrize.sFAndShopifyLoad after all loading is done : {0}'.format(tracemalloc.get_traced_memory()))
         return
 
     def verifyLoaded(self,label):
         if not self.raw:
-            self.msg = 'Failed running DoorPrize.{0}. No data loaded for this DoorPrize object. Call DoorPrize.constantContactAndShopifyLoad() running this function.'.format(label)
+            self.msg = 'Failed running DoorPrize.{0}. No data loaded for this DoorPrize object. Call DoorPrize.sFAndShopifyLoad() running this function.'.format(label)
             return False
         self.msg = ''
         return True
 
     def show_dicts_summary(self):
         msg = '-----------------------------------------------------\n'
-        msg += 'DoorPrize.dpSrc.cc size:{0}\n'.format(len(self.dpSrc.cc))
-        msg += 'DoorPrize.dpSrc.cc_reject size:{0}\n'.format(len(self.dpSrc.cc_reject))
+        msg += 'DoorPrize.dpSrc.sf size:{0}\n'.format(len(self.dpSrc.sf))
+        msg += 'DoorPrize.dpSrc.sf_reject size:{0}\n'.format(len(self.dpSrc.sf_reject))
         msg += 'DoorPrize.dpSrc.shopify size:{0}\n'.format(len(self.dpSrc.shopify))
         msg += 'DoorPrize.dpRes.reject size:{0}\n'.format(len(self.dpRes.reject))
         msg += 'DoorPrize.dpRes.eligible size:{0}\n'.format(len(self.dpRes.eligible))
@@ -148,8 +257,8 @@ class DoorPrize(AccessShopify):
     def show_dicts(self):
         if not self.verifyLoaded('show_dicts'):
             return self.msg
-        msg = show_dict(self.dpSrc.cc, 'DoorPrize.dpSrc.cc')
-        msg += show_dict(self.dpSrc.cc_reject, 'DoorPrize.dpSrc.cc_reject')
+        msg = show_dict(self.dpSrc.sf, 'DoorPrize.dpSrc.sf')
+        msg += show_dict(self.dpSrc.sf_reject, 'DoorPrize.dpSrc.sf_reject')
         msg += show_dict(self.dpSrc.shopify, 'DoorPrize.dpSrc.shopify')
         msg += show_dict(self.dpRes.reject, 'DoorPrize.dpRes.reject')
         msg += show_dict(self.dpRes.eligible, 'DoorPrize.dpRes.eligible')
@@ -164,7 +273,7 @@ class DoorPrize(AccessShopify):
         Winners determined by 3 sources:
         1) All NEAF and NEAIC purchases online from Shopify can be acquired by
            webservice call to Shopify using {0}
-        2) All Door Prize entries in Constant Contact.       Acquired from Constant Contact api.
+        2) All Door Prize entries in Shopify form named 'NEAF Door Prize Entry'. Acquired from Google Sheet api.
         3) Prior winners in file {1}.csv and are excluded from future drawings.
 
         Exclude any entries in item 2) with email addresses that match item 1).
@@ -175,8 +284,8 @@ class DoorPrize(AccessShopify):
         For example if you have Shopify sku of neaf_attend_admit_saturday and its Sunday you will be in reject dict.
         
         created_at_max:{2}, created_at_min:{3}, neaf_year:{4}, neaf_year_raw:{5}, neaf_day_of_week:{6}
-        # CC eligible entries:             {7:4}    # CC entries rejected:            {8:4} 
-        # eligible Shopify and CC entries: {9:4}    # CC and Shopify entries rejected:{10:4}   
+        # SF eligible entries:             {7:4}    # SF entries rejected:            {8:4} 
+        # eligible Shopify and SF entries: {9:4}    # SF and Shopify entries rejected:{10:4}   
         # Door Prize Winners:              {11:4}
 
     ---------------------------------------------------------------------------------------------------------------------    
@@ -186,7 +295,7 @@ class DoorPrize(AccessShopify):
         hints += '\n' + show_paths_and_files_dp(self.neaf_year,self.neaf_day_of_week)
         hints = hints.format(webservice_name,  DOOR_PRIZE_WINNER.format(neaf_year=self.neaf_year, neaf_day_of_week=self.neaf_day_of_week),
                              self.created_at_max, self.created_at_min, self.neaf_year, self.neaf_year_raw, self.neaf_day_of_week,
-                             len(self.dpSrc.cc), len(self.dpSrc.cc_reject),
+                             len(self.dpSrc.sf), len(self.dpSrc.sf_reject),
                              len(self.dpRes.eligible),len(self.dpRes.reject),
                              len(self.dpSrc.winner))
 
@@ -231,15 +340,15 @@ class DoorPrize(AccessShopify):
         winner += 1
         return (winner, order_num, dpt)
 
-    def append_to_door_price_winner_dict(self,door_prize_winner_dict, order_num, door_prize_cc_dict, door_prize_dict):
-        dpt_cc = door_prize_cc_dict.get(order_num)
+    def append_to_door_price_winner_dict(self,door_prize_winner_dict, order_num, door_prize_sf_dict, door_prize_dict):
+        dpt_sf = door_prize_sf_dict.get(order_num)
         dpt_door_prize = door_prize_dict.get(order_num)
-        dpt = dpt_cc or dpt_door_prize
+        dpt = dpt_sf or dpt_door_prize
         if not dpt:
             msg = 'Failure adding key of {0} to door_prize_winner_dict of '\
-                  'size {1}. Its missing from door_prize_cc_dict of size {1} and door_prize_dict of size '\
+                  'size {1}. Its missing from door_prize_sf_dict of size {1} and door_prize_dict of size '\
                   '{2}'
-            input(msg.format(order_num, len(door_prize_winner_dict), len(door_prize_cc_dict), len(door_prize_dict)))
+            input(msg.format(order_num, len(door_prize_winner_dict), len(door_prize_sf_dict), len(door_prize_dict)))
             raise Exception
         dpt_orig = door_prize_winner_dict.get(order_num)
         if dpt_orig:
@@ -253,9 +362,9 @@ class DoorPrize(AccessShopify):
         return
 
     def adjustEligibleForWinner(self,order_num):
-        self.append_to_door_price_winner_dict(self.dpSrc.winner, order_num, self.dpSrc.cc, self.dpSrc.shopify)
+        self.append_to_door_price_winner_dict(self.dpSrc.winner, order_num, self.dpSrc.sf, self.dpSrc.shopify)
         write_door_prize_file(self.dpSrc.winner, DOOR_PRIZE_WINNER, self.neaf_year, self.neaf_day_of_week)
-        door_prize_eligible_dict, door_prize_reject_dict = self.build_eligible_door_prize_dict(self.dpSrc.winner, self.dpSrc.cc, self.dpSrc.shopify)
+        door_prize_eligible_dict, door_prize_reject_dict = self.build_eligible_door_prize_dict(self.dpSrc.winner, self.dpSrc.sf, self.dpSrc.shopify)
         return door_prize_eligible_dict, door_prize_reject_dict
 
     def pick_and_show_winner(self):
@@ -310,7 +419,7 @@ def main():
 
     def valid_dp(label,dp):
         if not dp:
-            print("Cannot run '{0}' option. First run '0:CC and Shopify Load' and build DoorPrize object.".format(label))
+            print("Cannot run '{0}' option. First run '0:SF and Shopify Load' and build DoorPrize object.".format(label))
             return False
         return True
 
@@ -321,7 +430,7 @@ def main():
     while True:
         print('\n\n12:stop')
         print('\n\n5:verbose True    6:verbose False    7:hints    8:show paths and files    9:get_random_index   10 <search item>   11:get random number 0 to 99')
-        msg =     '0:CC and Shopify Load   1:pick_winner   2:build winners pdf   3:show_dicts    4:choose_day(sat, sun, def)\n-----> '
+        msg =     '0:SF and Shopify Load   1:pick_winner   2:build winners pdf   3:show_dicts    4:choose_day(sat, sun, def)\n-----> '
         optionstr = input(msg)
         toks = optionstr.split()
         optionstr = toks[0]
@@ -374,7 +483,7 @@ def main():
         if option == 0:
 
             dp = DoorPrize(override_day=override_day,verbose=verbose)
-            dp.constantContactAndShopifyLoad()
+            dp.sFAndShopifyLoad()
             if dp.error:
                 print(dp.error)
 
