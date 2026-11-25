@@ -27,10 +27,13 @@ from utils import remove_unicode
 #                  Constant Contact to the Shopify form named 'NEAF Door Prize Entry' with form ID 1175570. We will retain this constant contact file in case
 #                  we ever want to prgrammatically access constant contact data. its extremely unlikely we will ever use constant contact data for the door prize system
 #                  but we might want to use it for management of the RAC email lists.
-CC_REFRESH_TOKEN='AcYpQcoFmcrFwbk_NI3QJ4Z9p8vH0jrW_PBwHkI9MXw'
-CC_CLIENT_ID='b66111d9-86d7-4579-bfdb-25243897684d'
-CC_CLIENT_SECRET = 'RQbzH9NqqjcNuFCxhS_KjA'
-CC_NEAF_DOOR_PRIZE_REGISTRATION_LIST_ID='f625b1c0-8308-11e4-b9e1-d4ae528440e0'
+# 11/24/2026.      Constant Contact deactivated this app after its credentials were
+#                  accidentally committed to public GitHub. If API access is ever needed again,
+#                  create a new Constant Contact app and store its credentials in credentials.txt.
+CC_REFRESH_TOKEN='DEACTIVATED_APP_BY_CC_ON_20262411_GET_NEW_CREDENTIALS_IF_NEEDED'
+CC_CLIENT_ID='DEACTIVATED_APP_BY_CC_ON_20262411'
+CC_CLIENT_SECRET = 'DEACTIVATED_APP_BY_CC_ON_20262411_GET_NEW_CREDENTIALS_IF_NEEDED'
+CC_NEAF_DOOR_PRIZE_REGISTRATION_LIST_ID='DEACTIVATED_APP_BY_CC_ON_20262411'
 
 # XXX 6/2/2026    On an unpredictable time frame (typically many months), Constant Contact may replace the refresh token currently stored in credentials.txt
 #                 as the CC_REFRESH_TOKEN value.
